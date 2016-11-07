@@ -797,6 +797,7 @@ static int vc4_prepare_fb(struct drm_plane *plane,
 			  struct drm_plane_state *state)
 {
 	struct vc4_bo *bo;
+	struct fence *fence;
 	int ret;
 
 	if ((plane->state->fb == state->fb) || !state->fb)
@@ -807,6 +808,9 @@ static int vc4_prepare_fb(struct drm_plane *plane,
 	ret = vc4_bo_inc_usecnt(bo);
 	if (ret)
 		return ret;
+
+	fence = reservation_object_get_excl_rcu(bo->resv);
+	drm_atomic_set_fence_for_plane(state, fence);
 
 	return 0;
 }

@@ -228,14 +228,14 @@ to_vc4_bo(struct drm_gem_object *bo)
 }
 
 struct vc4_fence {
-	struct dma_fence base;
+	struct fence base;
 	struct drm_device *dev;
 	/* vc4 seqno for signaled() test */
 	uint64_t seqno;
 };
 
 static inline struct vc4_fence *
-to_vc4_fence(struct dma_fence *fence)
+to_vc4_fence(struct fence *fence)
 {
 	return (struct vc4_fence *)fence;
 }
@@ -312,7 +312,7 @@ struct vc4_exec_info {
 	/* Latest write_seqno of any BO that binning depends on. */
 	uint64_t bin_dep_seqno;
 
-	struct dma_fence *fence;
+	struct fence *fence;
 
 	/* Last current addresses the hardware was processing when the
 	 * hangcheck timer checked on us.
@@ -579,7 +579,7 @@ extern struct platform_driver vc4_firmware_kms_driver;
 void vc4_fkms_cancel_page_flip(struct drm_crtc *crtc, struct drm_file *file);
 
 /* vc4_fence.c */
-extern const struct dma_fence_ops vc4_fence_ops;
+extern const struct fence_ops vc4_fence_ops;
 
 /* vc4_gem.c */
 void vc4_gem_init(struct drm_device *dev);

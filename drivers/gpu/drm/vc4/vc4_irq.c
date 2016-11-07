@@ -138,7 +138,8 @@ vc4_irq_finish_render_job(struct drm_device *dev)
 	vc4->finished_seqno++;
 	list_move_tail(&exec->head, &vc4->job_done_list);
 	if (exec->fence) {
-		dma_fence_signal_locked(exec->fence);
+		fence_signal_locked(exec->fence);
+		fence_put(exec->fence);
 		exec->fence = NULL;
 	}
 	vc4_submit_next_render_job(dev);

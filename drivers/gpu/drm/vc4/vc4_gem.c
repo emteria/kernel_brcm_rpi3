@@ -634,7 +634,7 @@ vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec,
 	seqno = ++vc4->emit_seqno;
 	exec->seqno = seqno;
 
-	dma_fence_init(&fence->base, &vc4_fence_ops, &vc4->job_lock,
+	fence_init(&fence->base, &vc4_fence_ops, &vc4->job_lock,
 		       vc4->dma_fence_context, exec->seqno);
 	fence->seqno = exec->seqno;
 	exec->fence = &fence->base;
@@ -886,8 +886,10 @@ vc4_complete_exec(struct drm_device *dev, struct vc4_exec_info *exec)
 	/* If we got force-completed because of GPU reset rather than
 	 * through our IRQ handler, signal the fence now.
 	 */
-	if (exec->fence)
-		dma_fence_signal(exec->fence);
+	if (exec->fence) {
+		fence_signal(exec->fence);
+		fence_put(exec->fence);
+	}
 
 	if (exec->bo) {
 		for (i = 0; i < exec->bo_count; i++) {
@@ -1140,7 +1142,7 @@ vc4_gem_init(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
-	vc4->dma_fence_context = dma_fence_context_alloc(1);
+	vc4->dma_fence_context = fence_context_alloc(1);
 
 	INIT_LIST_HEAD(&vc4->bin_job_list);
 	INIT_LIST_HEAD(&vc4->render_job_list);

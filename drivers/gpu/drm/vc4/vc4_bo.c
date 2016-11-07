@@ -205,9 +205,6 @@ static void vc4_bo_destroy(struct vc4_bo *bo)
 		bo->validated_shader = NULL;
 	}
 
-	vc4->bo_stats.num_allocated--;
-	vc4->bo_stats.size_allocated -= obj->size;
-
 	reservation_object_fini(&bo->_resv);
 
 	drm_gem_cma_free_object(obj);
