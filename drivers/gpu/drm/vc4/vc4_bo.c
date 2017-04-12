@@ -19,6 +19,8 @@
  * rendering can return quickly.
  */
 
+#include <linux/dma-buf.h>
+
 #include "vc4_drv.h"
 #include "uapi/drm/vc4_drm.h"
 
@@ -86,11 +88,11 @@ int vc4_bo_stats_debugfs(struct seq_file *m, void *unused)
 
 	mutex_lock(&vc4->purgeable.lock);
 	if (vc4->purgeable.num)
-		seq_printf(m, "%30s: %6dkb BOs (%d)\n", "userspace BO cache",
+		seq_printf(m, "%30s: %6zdkb BOs (%d)\n", "userspace BO cache",
 			   vc4->purgeable.size / 1024, vc4->purgeable.num);
 
 	if (vc4->purgeable.purged_num)
-		seq_printf(m, "%30s: %6dkb BOs (%d)\n", "total purged BO",
+		seq_printf(m, "%30s: %6zdkb BOs (%d)\n", "total purged BO",
 			   vc4->purgeable.purged_size / 1024,
 			   vc4->purgeable.purged_num);
 	mutex_unlock(&vc4->purgeable.lock);
@@ -202,6 +204,11 @@ static void vc4_bo_destroy(struct vc4_bo *bo)
 		kfree(bo->validated_shader);
 		bo->validated_shader = NULL;
 	}
+
+	vc4->bo_stats.num_allocated--;
+	vc4->bo_stats.size_allocated -= obj->size;
+
+	reservation_object_fini(&bo->_resv);
 
 	drm_gem_cma_free_object(obj);
 }
@@ -427,6 +434,8 @@ struct drm_gem_object *vc4_create_object(struct drm_device *dev, size_t size)
 	vc4->bo_labels[VC4_BO_TYPE_KERNEL].num_allocated++;
 	vc4->bo_labels[VC4_BO_TYPE_KERNEL].size_allocated += size;
 	mutex_unlock(&vc4->bo_lock);
+	bo->resv = &bo->_resv;
+	reservation_object_init(bo->resv);
 
 	return &bo->base.base;
 }
@@ -682,6 +691,13 @@ static void vc4_bo_cache_time_timer(unsigned long data)
 	schedule_work(&vc4->bo_cache.time_work);
 }
 
+struct reservation_object *vc4_prime_res_obj(struct drm_gem_object *obj)
+{
+	struct vc4_bo *bo = to_vc4_bo(obj);
+
+	return bo->resv;
+}
+
 struct dma_buf *
 vc4_prime_export(struct drm_device *dev, struct drm_gem_object *obj, int flags)
 {
@@ -804,6 +820,24 @@ void *vc4_prime_vmap(struct drm_gem_object *obj)
 	}
 
 	return drm_gem_cma_prime_vmap(obj);
+}
+
+struct drm_gem_object *
+vc4_prime_import_sg_table(struct drm_device *dev,
+			  struct dma_buf_attachment *attach,
+			  struct sg_table *sgt)
+{
+	struct drm_gem_object *obj;
+	struct vc4_bo *bo;
+
+	obj = drm_gem_cma_prime_import_sg_table(dev, attach, sgt);
+	if (IS_ERR(obj))
+		return obj;
+
+	bo = to_vc4_bo(obj);
+	bo->resv = attach->dmabuf->resv;
+
+	return obj;
 }
 
 int vc4_create_bo_ioctl(struct drm_device *dev, void *data,
