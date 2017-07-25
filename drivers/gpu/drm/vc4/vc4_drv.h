@@ -29,6 +29,24 @@ enum vc4_kernel_bo_type {
 	VC4_BO_TYPE_COUNT
 };
 
+/* Don't forget to update vc4_bo.c: bo_type_names[] when adding to
+ * this.
+ */
+enum vc4_kernel_bo_type {
+	/* Any kernel allocation (gem_create_object hook) before it
+	 * gets another type set.
+	 */
+	VC4_BO_TYPE_KERNEL,
+	VC4_BO_TYPE_V3D,
+	VC4_BO_TYPE_V3D_SHADER,
+	VC4_BO_TYPE_DUMB,
+	VC4_BO_TYPE_BIN,
+	VC4_BO_TYPE_RCL,
+	VC4_BO_TYPE_BCL,
+	VC4_BO_TYPE_KERNEL_CACHE,
+	VC4_BO_TYPE_COUNT
+};
+
 struct vc4_dev {
 	struct drm_device *dev;
 

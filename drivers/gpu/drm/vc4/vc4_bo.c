@@ -164,7 +164,8 @@ static uint32_t bo_page_index(size_t size)
 static void vc4_bo_destroy(struct vc4_bo *bo)
 {
 	struct drm_gem_object *obj = &bo->base.base;
-	struct vc4_dev *vc4 = to_vc4_dev(obj->dev);
+
+	vc4_bo_set_label(obj, -1);
 
 	lockdep_assert_held(&vc4->bo_lock);
 
@@ -181,9 +182,6 @@ static void vc4_bo_destroy(struct vc4_bo *bo)
 
 static void vc4_bo_remove_from_cache(struct vc4_bo *bo)
 {
-	struct vc4_dev *vc4 = to_vc4_dev(bo->base.base.dev);
-
-	lockdep_assert_held(&vc4->bo_lock);
 	list_del(&bo->unref_head);
 	list_del(&bo->size_head);
 }
