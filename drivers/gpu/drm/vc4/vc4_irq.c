@@ -191,6 +191,7 @@ vc4_irq_preinstall(struct drm_device *dev)
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 
 	init_waitqueue_head(&vc4->job_wait_queue);
+	spin_lock_init(&vc4->job_lock);
 	INIT_WORK(&vc4->overflow_mem_work, vc4_overflow_mem_work);
 
 	/* Clear any pending interrupts someone might have left around
