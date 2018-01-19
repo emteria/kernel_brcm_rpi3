@@ -42,6 +42,7 @@ extern "C" {
 #define DRM_VC4_GET_TILING                        0x09
 #define DRM_VC4_LABEL_BO                          0x0a
 #define DRM_VC4_GEM_MADVISE                       0x0b
+#define DRM_VC4_GET_SEQNO_FD			  0x0c
 
 #define DRM_IOCTL_VC4_SUBMIT_CL           DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_SUBMIT_CL, struct drm_vc4_submit_cl)
 #define DRM_IOCTL_VC4_WAIT_SEQNO          DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_WAIT_SEQNO, struct drm_vc4_wait_seqno)
@@ -55,6 +56,7 @@ extern "C" {
 #define DRM_IOCTL_VC4_GET_TILING          DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_GET_TILING, struct drm_vc4_get_tiling)
 #define DRM_IOCTL_VC4_LABEL_BO            DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_LABEL_BO, struct drm_vc4_label_bo)
 #define DRM_IOCTL_VC4_GEM_MADVISE         DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_GEM_MADVISE, struct drm_vc4_gem_madvise)
+#define DRM_IOCTL_VC4_GET_SEQNO_FD	  DRM_IOWR(DRM_COMMAND_BASE + DRM_VC4_GET_SEQNO_FD, struct drm_vc4_get_seqno_fd)
 
 struct drm_vc4_submit_rcl_surface {
 	__u32 hindex; /* Handle index, or ~0 if not present. */
@@ -157,12 +159,34 @@ struct drm_vc4_submit_cl {
 	__u32 pad:24;
 
 #define VC4_SUBMIT_CL_USE_CLEAR_COLOR			(1 << 0)
+/* By default, the kernel gets to choose the order that the tiles are
+ * rendered in.  If this is set, then the tiles will be rendered in a
+ * raster order, with the right-to-left vs left-to-right and
+ * top-to-bottom vs bottom-to-top dictated by
+ * VC4_SUBMIT_CL_RCL_ORDER_INCREASING_*.  This allows overlapping
+ * blits to be implemented using the 3D engine.
+ */
+#define VC4_SUBMIT_CL_FIXED_RCL_ORDER			(1 << 1)
+#define VC4_SUBMIT_CL_RCL_ORDER_INCREASING_X		(1 << 2)
+#define VC4_SUBMIT_CL_RCL_ORDER_INCREASING_Y		(1 << 3)
+#define VC4_SUBMIT_CL_IMPORT_FENCE_FD			(1 << 4)
+#define VC4_SUBMIT_CL_EXPORT_FENCE_FD			(1 << 5)
+
+#define VC4_SUBMIT_CL_FLAGS	(VC4_SUBMIT_CL_USE_CLEAR_COLOR | \
+				 VC4_SUBMIT_CL_FIXED_RCL_ORDER | \
+				 VC4_SUBMIT_CL_RCL_ORDER_INCREASING_X | \
+				 VC4_SUBMIT_CL_RCL_ORDER_INCREASING_Y | \
+				 VC4_SUBMIT_CL_IMPORT_FENCE_FD | \
+				 VC4_SUBMIT_CL_EXPORT_FENCE_FD)
 	__u32 flags;
 
 	/* Returned value of the seqno of this render job (for the
 	 * wait ioctl).
 	 */
 	__u64 seqno;
+
+	__s32 fence_fd;
+	__u32 pad64;
 };
 
 /**
@@ -298,6 +322,7 @@ struct drm_vc4_get_hang_state {
 #define DRM_VC4_PARAM_SUPPORTS_THREADED_FS	5
 #define DRM_VC4_PARAM_SUPPORTS_FIXED_RCL_ORDER	6
 #define DRM_VC4_PARAM_SUPPORTS_MADVISE		7
+#define DRM_VC4_PARAM_SUPPORTS_FENCE_FD		8
 
 struct drm_vc4_get_param {
 	__u32 param;
@@ -340,6 +365,12 @@ struct drm_vc4_gem_madvise {
 	__u32 madv;
 	__u32 retained;
 	__u32 pad;
+};
+
+struct drm_vc4_get_seqno_fd {
+	__u64 seqno;
+	__s32 out_fence_fd;
+	__u32 pad64;
 };
 
 #if defined(__cplusplus)

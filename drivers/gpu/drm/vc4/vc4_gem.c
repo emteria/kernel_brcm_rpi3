@@ -26,6 +26,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/sync_file.h>
 
 #include "uapi/drm/vc4_drm.h"
 #include "vc4_drv.h"
@@ -617,12 +618,13 @@ retry:
  */
 static int
 vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec,
-		 struct ww_acquire_ctx *acquire_ctx)
+		 struct ww_acquire_ctx *acquire_ctx, int out_fence_fd)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	uint64_t seqno;
 	unsigned long irqflags;
 	struct vc4_fence *fence;
+	struct sync_file *sync_file;
 
 	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
 	if (!fence)
@@ -638,6 +640,16 @@ vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec,
 		       vc4->dma_fence_context, exec->seqno);
 	fence->seqno = exec->seqno;
 	exec->fence = &fence->base;
+
+	if (out_fence_fd >= 0) {
+		sync_file = sync_file_create(exec->fence);
+		if (!sync_file) {
+			spin_unlock_irqrestore(&vc4->job_lock, irqflags);
+			return -ENOMEM;
+		}
+
+		fd_install(out_fence_fd, sync_file->file);
+	}
 
 	vc4_update_bo_seqnos(exec, seqno);
 
@@ -981,6 +993,50 @@ int vc4_queue_seqno_cb(struct drm_device *dev,
 	return ret;
 }
 
+int vc4_get_seqno_fd_ioctl(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv)
+{
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+	struct drm_vc4_get_seqno_fd *args = data;
+	struct vc4_fence *fence;
+	struct sync_file *sync_file;
+	int out_fence_fd = -1;
+	int ret = 0;
+
+	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+	if (!fence)
+		return -ENOMEM;
+	fence->dev = dev;
+
+	out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
+	if (out_fence_fd < 0) {
+		ret = out_fence_fd;
+		goto fail;
+	}
+
+	fence_init(&fence->base, &vc4_fence_ops, &vc4->job_lock,
+		       vc4->dma_fence_context, args->seqno);
+	fence->seqno = args->seqno;
+
+	sync_file = sync_file_create(&fence->base);
+	if (!sync_file) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	fd_install(out_fence_fd, sync_file->file);
+
+	/* The fence is only for the purpose of the fd. */
+	fence_put(&fence->base);
+	args->out_fence_fd = out_fence_fd;
+	return 0;
+
+fail:
+	kfree(fence);
+	if (out_fence_fd >= 0)
+		put_unused_fd(out_fence_fd);
+	return ret;
+}
+
 /* Scheduled when any job has been completed, this walks the list of
  * jobs that had completed and unrefs their BOs and frees their exec
  * structs.
@@ -1068,9 +1124,11 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	struct drm_vc4_submit_cl *args = data;
 	struct vc4_exec_info *exec;
 	struct ww_acquire_ctx acquire_ctx;
+	struct fence *in_fence = NULL;
+	int out_fence_fd = -1;
 	int ret = 0;
 
-	if ((args->flags & ~VC4_SUBMIT_CL_USE_CLEAR_COLOR) != 0) {
+	if ((args->flags & ~VC4_SUBMIT_CL_FLAGS) != 0) {
 		DRM_DEBUG("Unknown flags: 0x%02x\n", args->flags);
 		return -EINVAL;
 	}
@@ -1093,8 +1151,36 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	}
 	mutex_unlock(&vc4->power_lock);
 
+	/* If we import a fence fd, we need to wait on it. */
+	if (args->flags & VC4_SUBMIT_CL_IMPORT_FENCE_FD) {
+		in_fence = sync_file_get_fence(args->fence_fd);
+
+		if (!in_fence) {
+			DRM_DEBUG("Failed to get import fence\n");
+			kfree(exec);
+			return -EINVAL;
+		}
+
+		if (!fence_match_context(in_fence,
+					     vc4->dma_fence_context)) {
+			ret = fence_wait(in_fence, true);
+			if (ret) {
+				kfree(exec);
+				return ret;
+			}
+		}
+	}
+
 	exec->args = args;
 	INIT_LIST_HEAD(&exec->unref_list);
+
+	if (args->flags & VC4_SUBMIT_CL_EXPORT_FENCE_FD) {
+		out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
+		if (out_fence_fd < 0) {
+			ret = out_fence_fd;
+			goto fail;
+		}
+	}
 
 	ret = vc4_cl_lookup_bos(dev, file_priv, exec);
 	if (ret)
@@ -1122,9 +1208,16 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	 */
 	exec->args = NULL;
 
-	ret = vc4_queue_submit(dev, exec, &acquire_ctx);
+	ret = vc4_queue_submit(dev, exec, &acquire_ctx, out_fence_fd);
 	if (ret)
 		goto fail;
+
+	if (args->flags & VC4_SUBMIT_CL_EXPORT_FENCE_FD) {
+		/* The fd was linked to the dma fence inside vc4_queue_submit
+		 * to avoid a race with the job being processed by the GPU.
+		 */
+		args->fence_fd = out_fence_fd;
+	}
 
 	/* Return the seqno for our job. */
 	args->seqno = vc4->emit_seqno;
@@ -1132,6 +1225,10 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	return 0;
 
 fail:
+	if (out_fence_fd >= 0)
+		put_unused_fd(out_fence_fd);
+	if (in_fence)
+		fence_put(in_fence);
 	vc4_complete_exec(vc4->dev, exec);
 
 	return ret;

@@ -143,3 +143,29 @@ struct fence_array *fence_array_create(int num_fences, struct fence **fences,
 	return array;
 }
 EXPORT_SYMBOL(fence_array_create);
+
+/**
+ * dma_fence_match_context - Check if all fences are from the given context
+ * @fence:		[in]	fence or fence array
+ * @context:		[in]	fence context to check all fences against
+ *
+ * Checks the provided fence or, for a fence array, all fences in the array
+ * against the given context. Returns false if any fence is from a different
+ * context.
+ */
+bool fence_match_context(struct fence *fence, u64 context)
+{
+	struct fence_array *array = to_fence_array(fence);
+	unsigned i;
+
+	if (!fence_is_array(fence))
+		return fence->context == context;
+
+	for (i = 0; i < array->num_fences; i++) {
+		if (array->fences[i]->context != context)
+			return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(fence_match_context);
