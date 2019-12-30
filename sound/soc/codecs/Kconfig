@@ -548,7 +548,7 @@ config SND_SOC_LM49453
 	tristate
 
 config SND_SOC_MAX98088
-       tristate
+       tristate "Maxim MAX98088 codec"
 
 config SND_SOC_MAX98090
        tristate

@@ -147,6 +147,14 @@ static int bcm2835_restart_notifier_call(struct notifier_block *this,
 	if (cmd && !kstrtoull(cmd, 0, &val) && val <= 63)
 		partition = val;
 
+	char* param = (char*) cmd;
+	if (cmd && param[0] == 0x72) {
+		writel_relaxed(10 | PM_PASSWORD, wdt->base + PM_WDOG);
+		writel_relaxed(PM_RSTS_HADWRH_SET | PM_PASSWORD, wdt->base + PM_RSTS);
+		writel_relaxed(PM_RSTC_WRCFG_SET | PM_PASSWORD, wdt->base + PM_RSTC);
+		mdelay(1);
+	}
+
 	bcm2835_restart(wdt, partition);
 
 	return 0;

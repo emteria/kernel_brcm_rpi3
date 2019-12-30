@@ -447,6 +447,7 @@ static void bcm2835_sdhost_reset(struct mmc_host *mmc)
 	spin_lock_irqsave(&host->lock, flags);
 	log_event("RST<", 0, 0);
 
+	host->dma_chan = NULL;
 	bcm2835_sdhost_reset_internal(host);
 
 	spin_unlock_irqrestore(&host->lock, flags);
@@ -1310,6 +1311,9 @@ static void bcm2835_sdhost_timeout(unsigned long data)
 	spin_lock_irqsave(&host->lock, flags);
 	log_event("TIM<", 0, 0);
 
+	pr_err("resetting due to timeout\n");
+	bcm2835_sdhost_reset(host->mmc);
+
 	if (host->mrq) {
 		pr_err("%s: timeout waiting for hardware interrupt.\n",
 			mmc_hostname(host->mmc));
@@ -1325,7 +1329,7 @@ static void bcm2835_sdhost_timeout(unsigned long data)
 			else
 				host->mrq->cmd->error = -ETIMEDOUT;
 
-			pr_debug("timeout_timer tasklet_schedule\n");
+			pr_err("timeout_timer tasklet_schedule\n");
 			tasklet_schedule(&host->finish_tasklet);
 		}
 	}
