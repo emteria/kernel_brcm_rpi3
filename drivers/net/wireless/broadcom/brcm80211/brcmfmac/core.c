@@ -466,6 +466,155 @@ static const struct ethtool_ops brcmf_ethtool_ops = {
 	.get_drvinfo = brcmf_ethtool_get_drvinfo,
 };
 
+typedef struct android_wifi_priv_cmd {
+#ifdef CONFIG_COMPAT
+	compat_uptr_t buf;
+#else
+	char *buf;
+#endif
+	int used_len;
+	int total_len;
+} android_wifi_priv_cmd;
+
+enum ANDROID_WIFI_CMD {
+	ANDROID_WIFI_CMD_START,
+	ANDROID_WIFI_CMD_STOP,
+	ANDROID_WIFI_CMD_SCAN_ACTIVE,
+	ANDROID_WIFI_CMD_SCAN_PASSIVE,
+	ANDROID_WIFI_CMD_RSSI,
+	ANDROID_WIFI_CMD_LINKSPEED,
+	ANDROID_WIFI_CMD_RXFILTER_START,
+	ANDROID_WIFI_CMD_RXFILTER_STOP,
+	ANDROID_WIFI_CMD_RXFILTER_ADD,
+	ANDROID_WIFI_CMD_RXFILTER_REMOVE,
+	ANDROID_WIFI_CMD_BTCOEXSCAN_START,
+	ANDROID_WIFI_CMD_BTCOEXSCAN_STOP,
+	ANDROID_WIFI_CMD_BTCOEXMODE,
+	ANDROID_WIFI_CMD_SETSUSPENDOPT,
+	ANDROID_WIFI_CMD_P2P_DEV_ADDR,
+	ANDROID_WIFI_CMD_SETFWPATH,
+	ANDROID_WIFI_CMD_SETBAND,
+	ANDROID_WIFI_CMD_GETBAND,
+	ANDROID_WIFI_CMD_COUNTRY,
+	ANDROID_WIFI_CMD_P2P_SET_NOA,
+	ANDROID_WIFI_CMD_P2P_GET_NOA,
+	ANDROID_WIFI_CMD_P2P_SET_PS,
+	ANDROID_WIFI_CMD_SET_AP_WPS_P2P_IE,
+	ANDROID_WIFI_CMD_PNOSSIDCLR_SET,
+	ANDROID_WIFI_CMD_PNOSETUP_SET,
+	ANDROID_WIFI_CMD_PNOFORCE_SET,
+	ANDROID_WIFI_CMD_PNODEBUG_SET,
+	ANDROID_WIFI_CMD_MACADDR,
+	ANDROID_WIFI_CMD_BLOCK,
+	ANDROID_WIFI_CMD_WFD_ENABLE,
+	ANDROID_WIFI_CMD_WFD_DISABLE,
+	ANDROID_WIFI_CMD_WFD_SET_TCPPORT,
+	ANDROID_WIFI_CMD_WFD_SET_MAX_TPUT,
+	ANDROID_WIFI_CMD_WFD_SET_DEVTYPE,
+	ANDROID_WIFI_CMD_SETSUSPENDMODE,
+	ANDROID_WIFI_CMD_MAX
+};
+
+const char *android_wifi_cmd_str[ANDROID_WIFI_CMD_MAX] = {
+	"START",
+	"STOP",
+	"SCAN-ACTIVE",
+	"SCAN-PASSIVE",
+	"RSSI",
+	"LINKSPEED",
+	"RXFILTER-START",
+	"RXFILTER-STOP",
+	"RXFILTER-ADD",
+	"RXFILTER-REMOVE",
+	"BTCOEXSCAN-START",
+	"BTCOEXSCAN-STOP",
+	"BTCOEXMODE",
+	"SETSUSPENDOPT",
+	"P2P_DEV_ADDR",
+	"SETFWPATH",
+	"SETBAND",
+	"GETBAND",
+	"COUNTRY",
+	"P2P_SET_NOA",
+	"P2P_GET_NOA",
+	"P2P_SET_PS",
+	"SET_AP_WPS_P2P_IE",
+	"PNOSSIDCLR",
+	"PNOSETUP ",
+	"PNOFORCE",
+	"PNODEBUG",
+	"MACADDR",
+	"BLOCK",
+	"WFD-ENABLE",
+	"WFD-DISABLE",
+	"WFD-SET-TCPPORT",
+	"WFD-SET-MAXTPUT",
+	"WFD-SET-DEVTYPE",
+	"SETSUSPENDMODE"
+};
+
+static int brcmf_cmdstr_to_num(char *cmdstr)
+{
+	int cmd_num;
+	for (cmd_num = 0; cmd_num < ANDROID_WIFI_CMD_MAX; cmd_num++)
+		if (0 == strncasecmp(cmdstr, android_wifi_cmd_str[cmd_num], strlen(android_wifi_cmd_str[cmd_num])))
+			break;
+
+	return cmd_num;
+}
+
+static int brcmf_netdev_ioctl_entry(struct net_device *ndev, struct ifreq *ifr,
+				    int cmd)
+{
+	struct brcmf_if *ifp = netdev_priv(ndev);
+	struct brcmf_pub *drvr = ifp->drvr;
+
+	brcmf_dbg(TRACE, "Enter, idx=%d, cmd=0x%04x\n", ifp->bsscfgidx, cmd);
+
+	if (!drvr->iflist[ifp->bsscfgidx])
+		return -1;
+
+	if (cmd ==  SIOCDEVPRIVATE + 1) {
+		int cmd_num = ANDROID_WIFI_CMD_MAX;
+		int ret = -EOPNOTSUPP;
+		char *command = NULL;
+		android_wifi_priv_cmd priv_cmd;
+
+		if (!ifr->ifr_data) return -EINVAL;
+		if (copy_from_user(&priv_cmd, ifr->ifr_data, sizeof(android_wifi_priv_cmd)))
+			return -EFAULT;
+
+		command =  kzalloc((priv_cmd.total_len + 1), GFP_KERNEL);
+		if (!command) return -ENOMEM;
+		if (!access_ok(VERIFY_READ, priv_cmd.buf, priv_cmd.total_len)) {
+			ret = -EFAULT;
+			goto exit;
+		}
+		if (copy_from_user(command, (void *)priv_cmd.buf, priv_cmd.total_len)) {
+			ret = -EFAULT;
+			goto exit;
+		}
+
+		command[priv_cmd.total_len] = '\0';
+		cmd_num = brcmf_cmdstr_to_num(command);
+
+		switch(cmd_num) {
+		default:
+			brcmf_dbg(TRACE, "Igroring private ioctl command '%s'\n", command);
+			ret = 0;
+			break;
+		}
+
+	exit:
+		if (command) {
+			kfree(command);
+		}
+		return ret;
+	}
+
+	return -EOPNOTSUPP;
+}
+
 static int brcmf_netdev_stop(struct net_device *ndev)
 {
 	struct brcmf_if *ifp = netdev_priv(ndev);
@@ -519,6 +668,7 @@ static const struct net_device_ops brcmf_netdev_ops_pri = {
 	.ndo_open = brcmf_netdev_open,
 	.ndo_stop = brcmf_netdev_stop,
 	.ndo_get_stats = brcmf_netdev_get_stats,
+	.ndo_do_ioctl = brcmf_netdev_ioctl_entry,
 	.ndo_start_xmit = brcmf_netdev_start_xmit,
 	.ndo_set_mac_address = brcmf_netdev_set_mac_address,
 	.ndo_set_rx_mode = brcmf_netdev_set_multicast_list
