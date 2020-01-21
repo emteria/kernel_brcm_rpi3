@@ -985,6 +985,7 @@ targets += dtbs dtbs_install
 targets += $(DTB_LIST)
 
 always		:= $(DTB_LIST)
+subdir-y	:= overlays
 clean-files	:= *.dtb
 
 # Enable fixups to support overlays on BCM2835 platforms
