@@ -579,14 +579,18 @@ static int map_get_next_key(union bpf_attr *attr)
 		goto err_put;
 	}
 
-	err = -ENOMEM;
-	key = kmalloc(map->key_size, GFP_USER);
-	if (!key)
-		goto err_put;
+	if (ukey) {
+		err = -ENOMEM;
+		key = kmalloc(map->key_size, GFP_USER);
+		if (!key)
+			goto err_put;
 
-	err = -EFAULT;
-	if (copy_from_user(key, ukey, map->key_size) != 0)
-		goto free_key;
+		err = -EFAULT;
+		if (copy_from_user(key, ukey, map->key_size) != 0)
+			goto free_key;
+	} else {
+		key = NULL;
+	}
 
 	err = -ENOMEM;
 	next_key = kmalloc(map->key_size, GFP_USER);
@@ -970,7 +974,7 @@ SYSCALL_DEFINE3(bpf, int, cmd, union bpf_attr __user *, uattr, unsigned int, siz
 	union bpf_attr attr = {};
 	int err;
 
-	if (!capable(CAP_SYS_ADMIN) && sysctl_unprivileged_bpf_disabled)
+	if (sysctl_unprivileged_bpf_disabled && !capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	if (!access_ok(VERIFY_READ, uattr, 1))
