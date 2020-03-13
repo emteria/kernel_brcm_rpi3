@@ -26,6 +26,7 @@
 #include <linux/pm_runtime.h>
 #include <linux/device.h>
 #include <linux/io.h>
+#include <linux/sync_file.h>
 
 #include "uapi/drm/vc4_drm.h"
 #include "vc4_drv.h"
@@ -496,6 +497,8 @@ vc4_update_bo_seqnos(struct vc4_exec_info *exec, uint64_t seqno)
 	for (i = 0; i < exec->bo_count; i++) {
 		bo = to_vc4_bo(&exec->bo[i]->base);
 		bo->seqno = seqno;
+
+		reservation_object_add_shared_fence(bo->resv, exec->fence);
 	}
 
 	list_for_each_entry(bo, &exec->unref_list, unref_head) {
@@ -505,7 +508,103 @@ vc4_update_bo_seqnos(struct vc4_exec_info *exec, uint64_t seqno)
 	for (i = 0; i < exec->rcl_write_bo_count; i++) {
 		bo = to_vc4_bo(&exec->rcl_write_bo[i]->base);
 		bo->write_seqno = seqno;
+
+		reservation_object_add_excl_fence(bo->resv, exec->fence);
 	}
+}
+
+static void
+vc4_unlock_bo_reservations(struct drm_device *dev,
+			   struct vc4_exec_info *exec,
+			   struct ww_acquire_ctx *acquire_ctx)
+{
+	int i;
+
+	for (i = 0; i < exec->bo_count; i++) {
+		struct vc4_bo *bo = to_vc4_bo(&exec->bo[i]->base);
+
+		ww_mutex_unlock(&bo->resv->lock);
+	}
+
+	ww_acquire_fini(acquire_ctx);
+}
+
+/* Takes the reservation lock on all the BOs being referenced, so that
+ * at queue submit time we can update the reservations.
+ *
+ * We don't lock the RCL the tile alloc/state BOs, or overflow memory
+ * (all of which are on exec->unref_list).  They're entirely private
+ * to vc4, so we don't attach dma-buf fences to them.
+ */
+static int
+vc4_lock_bo_reservations(struct drm_device *dev,
+			 struct vc4_exec_info *exec,
+			 struct ww_acquire_ctx *acquire_ctx)
+{
+	int contended_lock = -1;
+	int i, ret;
+	struct vc4_bo *bo;
+
+	ww_acquire_init(acquire_ctx, &reservation_ww_class);
+
+retry:
+	if (contended_lock != -1) {
+		bo = to_vc4_bo(&exec->bo[contended_lock]->base);
+		ret = ww_mutex_lock_slow_interruptible(&bo->resv->lock,
+						       acquire_ctx);
+		if (ret) {
+			ww_acquire_done(acquire_ctx);
+			return ret;
+		}
+	}
+
+	for (i = 0; i < exec->bo_count; i++) {
+		if (i == contended_lock)
+			continue;
+
+		bo = to_vc4_bo(&exec->bo[i]->base);
+
+		ret = ww_mutex_lock_interruptible(&bo->resv->lock, acquire_ctx);
+		if (ret) {
+			int j;
+
+			for (j = 0; j < i; j++) {
+				bo = to_vc4_bo(&exec->bo[j]->base);
+				ww_mutex_unlock(&bo->resv->lock);
+			}
+
+			if (contended_lock != -1 && contended_lock >= i) {
+				bo = to_vc4_bo(&exec->bo[contended_lock]->base);
+
+				ww_mutex_unlock(&bo->resv->lock);
+			}
+
+			if (ret == -EDEADLK) {
+				contended_lock = i;
+				goto retry;
+			}
+
+			ww_acquire_done(acquire_ctx);
+			return ret;
+		}
+	}
+
+	ww_acquire_done(acquire_ctx);
+
+	/* Reserve space for our shared (read-only) fence references,
+	 * before we commit the CL to the hardware.
+	 */
+	for (i = 0; i < exec->bo_count; i++) {
+		bo = to_vc4_bo(&exec->bo[i]->base);
+
+		ret = reservation_object_reserve_shared(bo->resv);
+		if (ret) {
+			vc4_unlock_bo_reservations(dev, exec, acquire_ctx);
+			return ret;
+		}
+	}
+
+	return 0;
 }
 
 /* Queues a struct vc4_exec_info for execution.  If no job is
@@ -517,18 +616,44 @@ vc4_update_bo_seqnos(struct vc4_exec_info *exec, uint64_t seqno)
  * then bump the end address.  That's a change for a later date,
  * though.
  */
-static void
-vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec)
+static int
+vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec,
+		 struct ww_acquire_ctx *acquire_ctx, int out_fence_fd)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	uint64_t seqno;
 	unsigned long irqflags;
+	struct vc4_fence *fence;
+	struct sync_file *sync_file;
+
+	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+	if (!fence)
+		return -ENOMEM;
+	fence->dev = dev;
 
 	spin_lock_irqsave(&vc4->job_lock, irqflags);
 
 	seqno = ++vc4->emit_seqno;
 	exec->seqno = seqno;
+
+	fence_init(&fence->base, &vc4_fence_ops, &vc4->job_lock,
+		       vc4->dma_fence_context, exec->seqno);
+	fence->seqno = exec->seqno;
+	exec->fence = &fence->base;
+
+	if (out_fence_fd >= 0) {
+		sync_file = sync_file_create(exec->fence);
+		if (!sync_file) {
+			spin_unlock_irqrestore(&vc4->job_lock, irqflags);
+			return -ENOMEM;
+		}
+
+		fd_install(out_fence_fd, sync_file->file);
+	}
+
 	vc4_update_bo_seqnos(exec, seqno);
+
+	vc4_unlock_bo_reservations(dev, exec, acquire_ctx);
 
 	list_add_tail(&exec->head, &vc4->bin_job_list);
 
@@ -542,6 +667,8 @@ vc4_queue_submit(struct drm_device *dev, struct vc4_exec_info *exec)
 	}
 
 	spin_unlock_irqrestore(&vc4->job_lock, irqflags);
+
+	return 0;
 }
 
 /**
@@ -768,6 +895,14 @@ vc4_complete_exec(struct drm_device *dev, struct vc4_exec_info *exec)
 	unsigned long irqflags;
 	unsigned i;
 
+	/* If we got force-completed because of GPU reset rather than
+	 * through our IRQ handler, signal the fence now.
+	 */
+	if (exec->fence) {
+		fence_signal(exec->fence);
+		fence_put(exec->fence);
+	}
+
 	if (exec->bo) {
 		for (i = 0; i < exec->bo_count; i++) {
 			struct vc4_bo *bo = to_vc4_bo(&exec->bo[i]->base);
@@ -858,6 +993,50 @@ int vc4_queue_seqno_cb(struct drm_device *dev,
 	return ret;
 }
 
+int vc4_get_seqno_fd_ioctl(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv)
+{
+	struct vc4_dev *vc4 = to_vc4_dev(dev);
+	struct drm_vc4_get_seqno_fd *args = data;
+	struct vc4_fence *fence;
+	struct sync_file *sync_file;
+	int out_fence_fd = -1;
+	int ret = 0;
+
+	fence = kzalloc(sizeof(*fence), GFP_KERNEL);
+	if (!fence)
+		return -ENOMEM;
+	fence->dev = dev;
+
+	out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
+	if (out_fence_fd < 0) {
+		ret = out_fence_fd;
+		goto fail;
+	}
+
+	fence_init(&fence->base, &vc4_fence_ops, &vc4->job_lock,
+		       vc4->dma_fence_context, args->seqno);
+	fence->seqno = args->seqno;
+
+	sync_file = sync_file_create(&fence->base);
+	if (!sync_file) {
+		ret = -ENOMEM;
+		goto fail;
+	}
+	fd_install(out_fence_fd, sync_file->file);
+
+	/* The fence is only for the purpose of the fd. */
+	fence_put(&fence->base);
+	args->out_fence_fd = out_fence_fd;
+	return 0;
+
+fail:
+	kfree(fence);
+	if (out_fence_fd >= 0)
+		put_unused_fd(out_fence_fd);
+	return ret;
+}
+
 /* Scheduled when any job has been completed, this walks the list of
  * jobs that had completed and unrefs their BOs and frees their exec
  * structs.
@@ -944,9 +1123,12 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	struct drm_vc4_submit_cl *args = data;
 	struct vc4_exec_info *exec;
+	struct ww_acquire_ctx acquire_ctx;
+	struct fence *in_fence = NULL;
+	int out_fence_fd = -1;
 	int ret = 0;
 
-	if ((args->flags & ~VC4_SUBMIT_CL_USE_CLEAR_COLOR) != 0) {
+	if ((args->flags & ~VC4_SUBMIT_CL_FLAGS) != 0) {
 		DRM_DEBUG("Unknown flags: 0x%02x\n", args->flags);
 		return -EINVAL;
 	}
@@ -969,8 +1151,36 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	}
 	mutex_unlock(&vc4->power_lock);
 
+	/* If we import a fence fd, we need to wait on it. */
+	if (args->flags & VC4_SUBMIT_CL_IMPORT_FENCE_FD) {
+		in_fence = sync_file_get_fence(args->fence_fd);
+
+		if (!in_fence) {
+			DRM_DEBUG("Failed to get import fence\n");
+			kfree(exec);
+			return -EINVAL;
+		}
+
+		if (!fence_match_context(in_fence,
+					     vc4->dma_fence_context)) {
+			ret = fence_wait(in_fence, true);
+			if (ret) {
+				kfree(exec);
+				return ret;
+			}
+		}
+	}
+
 	exec->args = args;
 	INIT_LIST_HEAD(&exec->unref_list);
+
+	if (args->flags & VC4_SUBMIT_CL_EXPORT_FENCE_FD) {
+		out_fence_fd = get_unused_fd_flags(O_CLOEXEC);
+		if (out_fence_fd < 0) {
+			ret = out_fence_fd;
+			goto fail;
+		}
+	}
 
 	ret = vc4_cl_lookup_bos(dev, file_priv, exec);
 	if (ret)
@@ -989,12 +1199,25 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	if (ret)
 		goto fail;
 
+	ret = vc4_lock_bo_reservations(dev, exec, &acquire_ctx);
+	if (ret)
+		goto fail;
+
 	/* Clear this out of the struct we'll be putting in the queue,
 	 * since it's part of our stack.
 	 */
 	exec->args = NULL;
 
-	vc4_queue_submit(dev, exec);
+	ret = vc4_queue_submit(dev, exec, &acquire_ctx, out_fence_fd);
+	if (ret)
+		goto fail;
+
+	if (args->flags & VC4_SUBMIT_CL_EXPORT_FENCE_FD) {
+		/* The fd was linked to the dma fence inside vc4_queue_submit
+		 * to avoid a race with the job being processed by the GPU.
+		 */
+		args->fence_fd = out_fence_fd;
+	}
 
 	/* Return the seqno for our job. */
 	args->seqno = vc4->emit_seqno;
@@ -1002,6 +1225,10 @@ vc4_submit_cl_ioctl(struct drm_device *dev, void *data,
 	return 0;
 
 fail:
+	if (out_fence_fd >= 0)
+		put_unused_fd(out_fence_fd);
+	if (in_fence)
+		fence_put(in_fence);
 	vc4_complete_exec(vc4->dev, exec);
 
 	return ret;
@@ -1011,6 +1238,8 @@ void
 vc4_gem_init(struct drm_device *dev)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
+
+	vc4->dma_fence_context = fence_context_alloc(1);
 
 	INIT_LIST_HEAD(&vc4->bin_job_list);
 	INIT_LIST_HEAD(&vc4->render_job_list);

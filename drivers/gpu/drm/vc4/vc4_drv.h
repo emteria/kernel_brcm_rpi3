@@ -90,6 +90,8 @@ struct vc4_dev {
 		size_t purged_size;
 		struct mutex lock;
 	} purgeable;
+	
+	uint64_t dma_fence_context;
 
 	/* Sequence number for the last job queued in bin_job_list.
 	 * Starts at 0 (no jobs emitted).
@@ -213,12 +215,29 @@ struct vc4_bo {
 	/* Store purgeable/purged state here */
 	u32 madv;
 	struct mutex madv_lock;
+	
+	/* normally (resv == &_resv) except for imported bo's */
+	struct reservation_object *resv;
+	struct reservation_object _resv;
 };
 
 static inline struct vc4_bo *
 to_vc4_bo(struct drm_gem_object *bo)
 {
 	return (struct vc4_bo *)bo;
+}
+
+struct vc4_fence {
+	struct fence base;
+	struct drm_device *dev;
+	/* vc4 seqno for signaled() test */
+	uint64_t seqno;
+};
+
+static inline struct vc4_fence *
+to_vc4_fence(struct fence *fence)
+{
+	return (struct vc4_fence *)fence;
 }
 
 struct vc4_seqno_cb {
@@ -292,6 +311,8 @@ struct vc4_exec_info {
 
 	/* Latest write_seqno of any BO that binning depends on. */
 	uint64_t bin_dep_seqno;
+
+	struct fence *fence;
 
 	/* Last current addresses the hardware was processing when the
 	 * hangcheck timer checked on us.
@@ -510,7 +531,11 @@ int vc4_label_bo_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 int vc4_fault(struct vm_area_struct *vma, struct vm_fault *vmf);
 int vc4_mmap(struct file *filp, struct vm_area_struct *vma);
+struct reservation_object *vc4_prime_res_obj(struct drm_gem_object *obj);
 int vc4_prime_mmap(struct drm_gem_object *obj, struct vm_area_struct *vma);
+struct drm_gem_object *vc4_prime_import_sg_table(struct drm_device *dev,
+						 struct dma_buf_attachment *attach,
+						 struct sg_table *sgt);
 void *vc4_prime_vmap(struct drm_gem_object *obj);
 int vc4_bo_cache_init(struct drm_device *dev);
 void vc4_bo_cache_destroy(struct drm_device *dev);
@@ -553,6 +578,9 @@ int vc4_dsi_debugfs_regs(struct seq_file *m, void *unused);
 extern struct platform_driver vc4_firmware_kms_driver;
 void vc4_fkms_cancel_page_flip(struct drm_crtc *crtc, struct drm_file *file);
 
+/* vc4_fence.c */
+extern const struct fence_ops vc4_fence_ops;
+
 /* vc4_gem.c */
 void vc4_gem_init(struct drm_device *dev);
 void vc4_gem_destroy(struct drm_device *dev);
@@ -573,6 +601,8 @@ int vc4_queue_seqno_cb(struct drm_device *dev,
 		       void (*func)(struct vc4_seqno_cb *cb));
 int vc4_gem_madvise_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv);
+int vc4_get_seqno_fd_ioctl(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
 
 /* vc4_hdmi.c */
 extern struct platform_driver vc4_hdmi_driver;
