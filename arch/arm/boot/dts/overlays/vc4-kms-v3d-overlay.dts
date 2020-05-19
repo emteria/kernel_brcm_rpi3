@@ -159,6 +159,8 @@
 				BCM2835_PLLH_AUX
 				BCM2835_PLLH_PIX
 			>;
+		};
+	};
 
 	fragment@19 {
 		target = <&hdmi>;
