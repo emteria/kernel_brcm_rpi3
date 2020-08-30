@@ -232,7 +232,7 @@ static int _hub_info(dwc_otg_hcd_t * hcd, void *urb_handle, uint32_t * hub_addr,
 		else
 			*hub_addr = urb->dev->tt->hub->devnum;
 	}
-	*port_addr = urb->dev->tt->multi ? urb->dev->ttport : 1;
+	*port_addr = urb->dev->ttport;
    } else {
         *hub_addr = 0;
 	*port_addr = urb->dev->ttport;
@@ -454,11 +454,9 @@ static void hcd_init_fiq(void *cookie)
 		DWC_ERROR("Can't claim FIQ");
 		BUG();
 	}
-	DWC_WARN("FIQ on core %d at 0x%08x",
-				smp_processor_id(),
-				(fiq_fsm_enable ? (int)&dwc_otg_fiq_fsm : (int)&dwc_otg_fiq_nop));
-	DWC_WARN("FIQ ASM at 0x%08x length %d", (int)&_dwc_otg_fiq_stub, (int)(&_dwc_otg_fiq_stub_end - &_dwc_otg_fiq_stub));
-		set_fiq_handler((void *) &_dwc_otg_fiq_stub, &_dwc_otg_fiq_stub_end - &_dwc_otg_fiq_stub);
+	DWC_WARN("FIQ on core %d", smp_processor_id());
+	DWC_WARN("FIQ ASM at %px length %d", &_dwc_otg_fiq_stub, (int)(&_dwc_otg_fiq_stub_end - &_dwc_otg_fiq_stub));
+	set_fiq_handler((void *) &_dwc_otg_fiq_stub, &_dwc_otg_fiq_stub_end - &_dwc_otg_fiq_stub);
 	memset(&regs,0,sizeof(regs));
 
 	regs.ARM_r8 = (long) dwc_otg_hcd->fiq_state;
@@ -476,25 +474,40 @@ static void hcd_init_fiq(void *cookie)
 	set_fiq_regs(&regs);
 #endif
 
-	//Set the mphi periph to  the required registers
-	dwc_otg_hcd->fiq_state->mphi_regs.base    = otg_dev->os_dep.mphi_base;
-	dwc_otg_hcd->fiq_state->mphi_regs.ctrl    = otg_dev->os_dep.mphi_base + 0x4c;
-	dwc_otg_hcd->fiq_state->mphi_regs.outdda  = otg_dev->os_dep.mphi_base + 0x28;
-	dwc_otg_hcd->fiq_state->mphi_regs.outddb  = otg_dev->os_dep.mphi_base + 0x2c;
-	dwc_otg_hcd->fiq_state->mphi_regs.intstat = otg_dev->os_dep.mphi_base + 0x50;
 	dwc_otg_hcd->fiq_state->dwc_regs_base = otg_dev->os_dep.base;
-	DWC_WARN("MPHI regs_base at 0x%08x", (int)dwc_otg_hcd->fiq_state->mphi_regs.base);
-	//Enable mphi peripheral
-	writel((1<<31),dwc_otg_hcd->fiq_state->mphi_regs.ctrl);
+	//Set the mphi periph to the required registers
+	dwc_otg_hcd->fiq_state->mphi_regs.base    = otg_dev->os_dep.mphi_base;
+	if (otg_dev->os_dep.use_swirq) {
+		dwc_otg_hcd->fiq_state->mphi_regs.swirq_set =
+			otg_dev->os_dep.mphi_base + 0x1f0;
+		dwc_otg_hcd->fiq_state->mphi_regs.swirq_clr =
+			otg_dev->os_dep.mphi_base + 0x1f4;
+		DWC_WARN("Fake MPHI regs_base at 0x%08x",
+			 (int)dwc_otg_hcd->fiq_state->mphi_regs.base);
+	} else {
+		dwc_otg_hcd->fiq_state->mphi_regs.ctrl =
+			otg_dev->os_dep.mphi_base + 0x4c;
+		dwc_otg_hcd->fiq_state->mphi_regs.outdda
+			= otg_dev->os_dep.mphi_base + 0x28;
+		dwc_otg_hcd->fiq_state->mphi_regs.outddb
+			= otg_dev->os_dep.mphi_base + 0x2c;
+		dwc_otg_hcd->fiq_state->mphi_regs.intstat
+			= otg_dev->os_dep.mphi_base + 0x50;
+		DWC_WARN("MPHI regs_base at %px",
+			 dwc_otg_hcd->fiq_state->mphi_regs.base);
+
+		//Enable mphi peripheral
+		writel((1<<31),dwc_otg_hcd->fiq_state->mphi_regs.ctrl);
 #ifdef DEBUG
-	if (readl(dwc_otg_hcd->fiq_state->mphi_regs.ctrl) & 0x80000000)
-		DWC_WARN("MPHI periph has been enabled");
-	else
-		DWC_WARN("MPHI periph has NOT been enabled");
+		if (readl(dwc_otg_hcd->fiq_state->mphi_regs.ctrl) & 0x80000000)
+			DWC_WARN("MPHI periph has been enabled");
+		else
+			DWC_WARN("MPHI periph has NOT been enabled");
 #endif
+	}
 	// Enable FIQ interrupt from USB peripheral
 #ifdef CONFIG_ARM64
-	irq = platform_get_irq(otg_dev->os_dep.platformdev, 1);
+	irq = otg_dev->os_dep.fiq_num;
 
 	if (irq < 0) {
 		DWC_ERROR("Can't get SIM-FIQ irq");
@@ -511,7 +524,7 @@ static void hcd_init_fiq(void *cookie)
 	simfiq_irq = irq;
 #else
 #ifdef CONFIG_MULTI_IRQ_HANDLER
-	irq = platform_get_irq(otg_dev->os_dep.platformdev, 1);
+	irq = otg_dev->os_dep.fiq_num;
 #else
 	irq = INTERRUPT_VC_USB;
 #endif
@@ -519,6 +532,11 @@ static void hcd_init_fiq(void *cookie)
 		DWC_ERROR("Can't get FIQ irq");
 		return;
 	}
+	/*
+	 * We could take an interrupt immediately after enabling the FIQ.
+	 * Ensure coherency of hcd->fiq_state.
+	 */
+	smp_mb();
 	enable_fiq(irq);
 	local_fiq_enable();
 #endif
@@ -598,7 +616,11 @@ int hcd_init(dwc_bus_dev_t *_dev)
 
 	if (fiq_enable) {
 		if (num_online_cpus() > 1) {
-			/* bcm2709: can run the FIQ on a separate core to IRQs */
+			/*
+			 * bcm2709: can run the FIQ on a separate core to IRQs.
+			 * Ensure driver state is visible to other cores before setting up the FIQ.
+			 */
+			smp_mb();
 			smp_call_function_single(1, hcd_init_fiq, otg_dev, 1);
 		} else {
 			smp_call_function_single(0, hcd_init_fiq, otg_dev, 1);
@@ -619,11 +641,7 @@ int hcd_init(dwc_bus_dev_t *_dev)
 	 * allocates the DMA buffer pool, registers the USB bus, requests the
 	 * IRQ line, and calls hcd_start method.
 	 */
-#ifdef PLATFORM_INTERFACE
-	retval = usb_add_hcd(hcd, platform_get_irq(_dev, fiq_enable ? 0 : 1), IRQF_SHARED);
-#else
-	retval = usb_add_hcd(hcd, _dev->irq, IRQF_SHARED);
-#endif
+	retval = usb_add_hcd(hcd, otg_dev->os_dep.irq_num, IRQF_SHARED);
 	if (retval < 0) {
 		goto error2;
 	}
@@ -803,10 +821,6 @@ static int dwc_otg_urb_enqueue(struct usb_hcd *hcd,
 		dump_urb_info(urb, "dwc_otg_urb_enqueue");
 	}
 #endif
-
-	if (!urb->transfer_buffer && urb->transfer_buffer_length)
-		return -EINVAL;
-
 	if ((usb_pipetype(urb->pipe) == PIPE_ISOCHRONOUS)
 	    || (usb_pipetype(urb->pipe) == PIPE_INTERRUPT)) {
 		if (!dwc_otg_hcd_is_bandwidth_allocated
@@ -861,6 +875,13 @@ static int dwc_otg_urb_enqueue(struct usb_hcd *hcd,
 		dev_warn_once(&urb->dev->dev,
 			      "USB transfer_buffer was NULL, will use __bus_to_virt(%pad)=%p\n",
 			      &urb->transfer_dma, buf);
+	}
+
+	if (!buf && urb->transfer_buffer_length) {
+		DWC_FREE(dwc_otg_urb);
+		DWC_ERROR("transfer_buffer is NULL in PIO mode or both "
+			   "transfer_buffer and transfer_dma are NULL in DMA mode\n");
+		return -EINVAL;
 	}
 
 	if (!(urb->transfer_flags & URB_NO_INTERRUPT))

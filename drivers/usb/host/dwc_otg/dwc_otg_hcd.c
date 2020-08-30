@@ -175,6 +175,7 @@ static void kill_urbs_in_qh_list(dwc_otg_hcd_t * hcd, dwc_list_link_t * qh_list)
 	dwc_list_link_t *qh_item, *qh_tmp;
 	dwc_otg_qh_t *qh;
 	dwc_otg_qtd_t *qtd, *qtd_tmp;
+	int quiesced = 0;
 
 	DWC_LIST_FOREACH_SAFE(qh_item, qh_tmp, qh_list) {
 		qh = DWC_LIST_ENTRY(qh_item, dwc_otg_qh_t, qh_list_entry);
@@ -189,6 +190,7 @@ static void kill_urbs_in_qh_list(dwc_otg_hcd_t * hcd, dwc_list_link_t * qh_list)
 
 		}
 		if(qh->channel) {
+			int n = qh->channel->hc_num;
 			/* Using hcchar.chen == 1 is not a reliable test.
 			 * It is possible that the channel has already halted
 			 * but not yet been through the IRQ handler.
@@ -196,6 +198,18 @@ static void kill_urbs_in_qh_list(dwc_otg_hcd_t * hcd, dwc_list_link_t * qh_list)
 			if (fiq_fsm_enable && (hcd->fiq_state->channel[qh->channel->hc_num].fsm != FIQ_PASSTHROUGH)) {
 				qh->channel->halt_status = DWC_OTG_HC_XFER_URB_DEQUEUE;
 				qh->channel->halt_pending = 1;
+				if (hcd->fiq_state->channel[n].fsm == FIQ_HS_ISOC_TURBO ||
+				    hcd->fiq_state->channel[n].fsm == FIQ_HS_ISOC_SLEEPING)
+					hcd->fiq_state->channel[n].fsm = FIQ_HS_ISOC_ABORTED;
+				/* We're called from disconnect callback or in the middle of freeing the HCD here,
+				 * so FIQ is disabled, top-level interrupts masked and we're holding the spinlock.
+				 * No further URBs will be submitted, but wait 1 microframe for any previously
+				 * submitted periodic DMA to finish.
+				 */
+				if (!quiesced) {
+					udelay(125);
+					quiesced = 1;
+				}
 			} else {
 				dwc_otg_hc_halt(hcd->core_if, qh->channel,
 						DWC_OTG_HC_XFER_URB_DEQUEUE);
@@ -596,9 +610,34 @@ int dwc_otg_hcd_urb_dequeue(dwc_otg_hcd_t * hcd,
 			/* In FIQ FSM mode, we need to shut down carefully.
 			 * The FIQ may attempt to restart a disabled channel */
 			if (fiq_fsm_enable && (hcd->fiq_state->channel[n].fsm != FIQ_PASSTHROUGH)) {
+				int retries = 3;
+				int running = 0;
+				enum fiq_fsm_state state;
+
+				local_fiq_disable();
+				fiq_fsm_spin_lock(&hcd->fiq_state->lock);
 				qh->channel->halt_status = DWC_OTG_HC_XFER_URB_DEQUEUE;
 				qh->channel->halt_pending = 1;
-				//hcd->fiq_state->channel[n].fsm = FIQ_DEQUEUE_ISSUED;
+				if (hcd->fiq_state->channel[n].fsm == FIQ_HS_ISOC_TURBO ||
+				    hcd->fiq_state->channel[n].fsm == FIQ_HS_ISOC_SLEEPING)
+					hcd->fiq_state->channel[n].fsm = FIQ_HS_ISOC_ABORTED;
+				fiq_fsm_spin_unlock(&hcd->fiq_state->lock);
+				local_fiq_enable();
+
+				if (dwc_qh_is_non_per(qh)) {
+					do {
+						state = READ_ONCE(hcd->fiq_state->channel[n].fsm);
+						running = (state != FIQ_NP_SPLIT_DONE) &&
+							  (state != FIQ_NP_SPLIT_LS_ABORTED) &&
+							  (state != FIQ_NP_SPLIT_HS_ABORTED);
+						if (!running)
+							break;
+						udelay(125);
+					} while(--retries);
+					if (!retries)
+						DWC_WARN("Timed out waiting for FSM NP transfer to complete on %d",
+							 qh->channel->hc_num);
+				}
 			} else {
 				dwc_otg_hc_halt(hcd->core_if, qh->channel,
 						DWC_OTG_HC_XFER_URB_DEQUEUE);
@@ -915,6 +954,8 @@ static void dwc_otg_hcd_free(dwc_otg_hcd_t * dwc_otg_hcd)
 	DWC_TIMER_FREE(dwc_otg_hcd->conn_timer);
 	DWC_TASK_FREE(dwc_otg_hcd->reset_tasklet);
 	DWC_TASK_FREE(dwc_otg_hcd->completion_tasklet);
+	DWC_DMA_FREE(dev, 16, dwc_otg_hcd->fiq_state->dummy_send,
+		     dwc_otg_hcd->fiq_state->dummy_send_dma);
 	DWC_FREE(dwc_otg_hcd->fiq_state);
 
 #ifdef DWC_DEV_SRPCAP
@@ -1007,7 +1048,8 @@ int dwc_otg_hcd_init(dwc_otg_hcd_t * hcd, dwc_otg_core_if_t * core_if)
 		for (i = 0; i < num_channels; i++) {
 			hcd->fiq_state->channel[i].fsm = FIQ_PASSTHROUGH;
 		}
-		hcd->fiq_state->dummy_send = DWC_ALLOC_ATOMIC(16);
+		hcd->fiq_state->dummy_send = DWC_DMA_ALLOC_ATOMIC(dev, 16,
+							 &hcd->fiq_state->dummy_send_dma);
 
 		hcd->fiq_stack = DWC_ALLOC(sizeof(struct fiq_stack));
 		if (!hcd->fiq_stack) {
@@ -1027,8 +1069,8 @@ int dwc_otg_hcd_init(dwc_otg_hcd_t * hcd, dwc_otg_core_if_t * core_if)
 		 * moderately readable array casts.
 		 */
 		hcd->fiq_dmab = DWC_DMA_ALLOC(dev, (sizeof(struct fiq_dma_channel) * num_channels), &hcd->fiq_state->dma_base);
-		DWC_WARN("FIQ DMA bounce buffers: virt = 0x%08x dma = 0x%08x len=%d",
-				(unsigned int)hcd->fiq_dmab, (unsigned int)hcd->fiq_state->dma_base,
+		DWC_WARN("FIQ DMA bounce buffers: virt = %px dma = %pad len=%zu",
+				hcd->fiq_dmab, &hcd->fiq_state->dma_base,
 				sizeof(struct fiq_dma_channel) * num_channels);
 
 		DWC_MEMSET(hcd->fiq_dmab, 0x6b, 9024);
@@ -1169,6 +1211,7 @@ static void assign_and_init_hc(dwc_otg_hcd_t * hcd, dwc_otg_qh_t * qh)
 	dwc_otg_qtd_t *qtd;
 	dwc_otg_hcd_urb_t *urb;
 	void* ptr = NULL;
+	uint16_t wLength;
 	uint32_t intr_enable;
 	unsigned long flags;
 	gintmsk_data_t gintmsk = { .d32 = 0, };
@@ -1280,6 +1323,23 @@ static void assign_and_init_hc(dwc_otg_hcd_t * hcd, dwc_otg_qh_t * qh)
 			break;
 		case DWC_OTG_CONTROL_DATA:
 			DWC_DEBUGPL(DBG_HCDV, "  Control data transaction\n");
+			/*
+			 * Hardware bug: small IN packets with length < 4
+			 * cause a 4-byte write to memory. We can only catch
+			 * the case where we know a short packet is going to be
+			 * returned in a control transfer, as the length is
+			 * specified in the setup packet. This is only an issue
+			 * for drivers that insist on packing a device's various
+			 * properties into a struct and querying them one at a
+			 * time (uvcvideo).
+			 * Force the use of align_buf so that the subsequent
+			 * memcpy puts the right number of bytes in the URB's
+			 * buffer.
+			 */
+			wLength = ((uint16_t *)urb->setup_packet)[3];
+			if (hc->ep_is_in && wLength < 4)
+				ptr = hc->xfer_buff;
+
 			hc->data_pid_start = qtd->data_toggle;
 			break;
 		case DWC_OTG_CONTROL_STATUS:
@@ -1508,9 +1568,12 @@ int fiq_fsm_setup_periodic_dma(dwc_otg_hcd_t *hcd, struct fiq_channel_state *st,
 		/*
 		 * Set dma_regs to bounce buffer. FIQ will update the
 		 * state depending on transaction progress.
+		 * Pointer arithmetic on hcd->fiq_state->dma_base (a dma_addr_t)
+		 * to point it to the correct offset in the allocated buffers.
 		 */
 		blob = (struct fiq_dma_blob *) hcd->fiq_state->dma_base;
-		st->hcdma_copy.d32 = (uint32_t) &blob->channel[hc->hc_num].index[0].buf[0];
+		st->hcdma_copy.d32 = (dma_addr_t) blob->channel[hc->hc_num].index[0].buf;
+
 		/* Calculate the max number of CSPLITS such that the FIQ can time out
 		 * a transaction if it fails.
 		 */
@@ -1557,9 +1620,15 @@ int fiq_fsm_setup_periodic_dma(dwc_otg_hcd_t *hcd, struct fiq_channel_state *st,
 				st->nrpackets = i;
 			}
 			ptr = qtd->urb->buf + frame_desc->offset;
-			/* Point the HC at the DMA address of the bounce buffers */
+			/*
+			 * Point the HC at the DMA address of the bounce buffers
+			 *
+			 * Pointer arithmetic on hcd->fiq_state->dma_base (a
+			 * dma_addr_t) to point it to the correct offset in the
+			 * allocated buffers.
+			 */
 			blob = (struct fiq_dma_blob *) hcd->fiq_state->dma_base;
-			st->hcdma_copy.d32 = (uint32_t) &blob->channel[hc->hc_num].index[0].buf[0];
+			st->hcdma_copy.d32 = (dma_addr_t) blob->channel[hc->hc_num].index[0].buf;
 
 			/* fixup xfersize to the actual packet size */
 			st->hctsiz_copy.b.pid = 0;
@@ -1773,7 +1842,7 @@ int fiq_fsm_queue_split_transaction(dwc_otg_hcd_t *hcd, dwc_otg_qh_t *qh)
 	st->nr_errors = 0;
 
 	st->hcchar_copy.d32 = 0;
-	st->hcchar_copy.b.mps = hc->max_packet;
+	st->hcchar_copy.b.mps = min_t(uint32_t, hc->xfer_len, hc->max_packet);
 	st->hcchar_copy.b.epdir = hc->ep_is_in;
 	st->hcchar_copy.b.devaddr = hc->dev_addr;
 	st->hcchar_copy.b.epnum = hc->ep_num;
@@ -1818,7 +1887,7 @@ int fiq_fsm_queue_split_transaction(dwc_otg_hcd_t *hcd, dwc_otg_qh_t *qh)
 	st->hctsiz_copy.b.pid = hc->data_pid_start;
 
 	if (hc->ep_is_in || (hc->xfer_len > hc->max_packet)) {
-		hc->xfer_len = hc->max_packet;
+		hc->xfer_len = min_t(uint32_t, hc->xfer_len, hc->max_packet);
 	} else if (!hc->ep_is_in && (hc->xfer_len > 188)) {
 		hc->xfer_len = 188;
 	}
@@ -2005,7 +2074,6 @@ dwc_otg_transaction_type_e dwc_otg_hcd_select_transactions(dwc_otg_hcd_t * hcd)
 	dwc_list_link_t *qh_ptr;
 	dwc_otg_qh_t *qh;
 	int num_channels;
-	dwc_irqflags_t flags;
 	dwc_otg_transaction_type_e ret_val = DWC_OTG_TRANSACTION_NONE;
 
 #ifdef DEBUG_HOST_CHANNELS

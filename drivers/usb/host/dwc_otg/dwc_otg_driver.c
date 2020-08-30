@@ -247,6 +247,9 @@ bool fiq_fsm_enable = true;
 //Bulk split-transaction NAK holdoff in microframes
 uint16_t nak_holdoff = 8;
 
+//Force host mode during CIL re-init
+bool cil_force_host = true;
+
 unsigned short fiq_fsm_mask = 0x0F;
 
 unsigned short int_ep_interval_min = 0;
@@ -259,7 +262,7 @@ static ssize_t version_show(struct device_driver *dev, char *buf)
 			DWC_DRIVER_VERSION);
 }
 
-static DRIVER_ATTR(version, S_IRUGO, version_show, NULL);
+static DRIVER_ATTR_RO(version);
 
 /**
  * Global Debug Level Mask.
@@ -269,7 +272,7 @@ uint32_t g_dbg_lvl = 0;		/* OFF */
 /**
  * This function shows the driver Debug Level.
  */
-static ssize_t dbg_level_show(struct device_driver *drv, char *buf)
+static ssize_t debuglevel_show(struct device_driver *drv, char *buf)
 {
 	return sprintf(buf, "0x%0x\n", g_dbg_lvl);
 }
@@ -277,15 +280,14 @@ static ssize_t dbg_level_show(struct device_driver *drv, char *buf)
 /**
  * This function stores the driver Debug Level.
  */
-static ssize_t dbg_level_store(struct device_driver *drv, const char *buf,
+static ssize_t debuglevel_store(struct device_driver *drv, const char *buf,
 			       size_t count)
 {
 	g_dbg_lvl = simple_strtoul(buf, NULL, 16);
 	return count;
 }
 
-static DRIVER_ATTR(debuglevel, S_IRUGO | S_IWUSR, dbg_level_show,
-		   dbg_level_store);
+static DRIVER_ATTR_RW(debuglevel);
 
 /**
  * This function is called during module intialization
@@ -622,11 +624,7 @@ static int dwc_otg_driver_remove(        struct platform_device *_dev )
 	 * Free the IRQ
 	 */
 	if (otg_dev->common_irq_installed) {
-#ifdef PLATFORM_INTERFACE
-		free_irq(platform_get_irq(_dev, 0), otg_dev);
-#else
-		free_irq(_dev->irq, otg_dev);
-#endif
+		free_irq(otg_dev->os_dep.irq_num, otg_dev);
         } else {
 		DWC_DEBUGPL(DBG_ANY, "%s: There is no installed irq!\n", __func__);
 		return REM_RETVAL(-ENXIO);
@@ -808,14 +806,15 @@ static int dwc_otg_driver_probe(
 		if (!request_mem_region(_dev->resource[1].start,
 	                                _dev->resource[1].end - _dev->resource[1].start + 1,
 	                                "dwc_otg")) {
-	          dev_dbg(&_dev->dev, "error reserving mapped memory\n");
-	          retval = -EFAULT;
-	          goto fail;
-	}
+			dev_dbg(&_dev->dev, "error reserving mapped memory\n");
+			retval = -EFAULT;
+			goto fail;
+		}
 
 		dwc_otg_device->os_dep.mphi_base = ioremap_nocache(_dev->resource[1].start,
 							    _dev->resource[1].end -
 							    _dev->resource[1].start + 1);
+		dwc_otg_device->os_dep.use_swirq = (_dev->resource[1].end - _dev->resource[1].start) == 0x200;
 	}
 
 #else
@@ -835,8 +834,7 @@ static int dwc_otg_driver_probe(
 		retval = -ENOMEM;
 		goto fail;
 	}
-	dev_dbg(&_dev->dev, "base=0x%08x\n",
-                (unsigned)dwc_otg_device->os_dep.base);
+	dev_info(&_dev->dev, "base=%p\n", dwc_otg_device->os_dep.base);
 #endif
 
 	/*
@@ -904,7 +902,9 @@ static int dwc_otg_driver_probe(
 	 */
 
 #if defined(PLATFORM_INTERFACE)
-	devirq = platform_get_irq(_dev, fiq_enable ? 0 : 1);
+	devirq = platform_get_irq_byname(_dev, fiq_enable ? "soft" : "usb");
+	if (devirq < 0)
+	    devirq = platform_get_irq(_dev, fiq_enable ? 0 : 1);
 #else
 	devirq = _dev->irq;
 #endif
@@ -920,6 +920,14 @@ static int dwc_otg_driver_probe(
 		goto fail;
 	} else {
 		dwc_otg_device->common_irq_installed = 1;
+	}
+	dwc_otg_device->os_dep.irq_num = devirq;
+	dwc_otg_device->os_dep.fiq_num = -EINVAL;
+	if (fiq_enable) {
+		int devfiq = platform_get_irq_byname(_dev, "usb");
+		if (devfiq < 0)
+			devfiq = platform_get_irq(_dev, 1);
+		dwc_otg_device->os_dep.fiq_num = devfiq;
 	}
 
 #ifndef IRQF_TRIGGER_LOW
@@ -1403,6 +1411,10 @@ module_param(int_ep_interval_min, ushort, 0644);
 MODULE_PARM_DESC(int_ep_interval_min, "Clamp high-speed Interrupt endpoints to a minimum polling interval.\n"
 					"0..1 = Use endpoint default\n"
 					"2..n = Minimum interval n microframes. Use powers of 2.\n");
+
+module_param(cil_force_host, bool, 0644);
+MODULE_PARM_DESC(cil_force_host, "On a connector-ID status change, "
+					"force Host Mode regardless of OTG state.");
 
 /** @page "Module Parameters"
  *
