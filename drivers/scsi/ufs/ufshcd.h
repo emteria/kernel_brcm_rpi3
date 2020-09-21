@@ -329,6 +329,8 @@ struct ufs_pwr_mode_info {
  * @phy_initialization: used to initialize phys
  * @device_reset: called to issue a reset pulse on the UFS device
  * @program_key: program or evict an inline encryption key
+ * @fill_prdt: called after initializing the standard PRDT fields so that any
+ *	       variant-specific PRDT fields can be initialized too
  */
 struct ufs_hba_variant_ops {
 	const char *name;
@@ -364,6 +366,8 @@ struct ufs_hba_variant_ops {
 					void *data);
 	int	(*program_key)(struct ufs_hba *hba,
 			       const union ufs_crypto_cfg_entry *cfg, int slot);
+	int	(*fill_prdt)(struct ufs_hba *hba, struct ufshcd_lrb *lrbp,
+			     unsigned int segments);
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
@@ -558,6 +562,7 @@ struct ufs_hba_variant_params {
  * @saved_err: sticky error mask
  * @saved_uic_err: sticky UIC error mask
  * @force_reset: flag to force eh_work perform a full reset
+ * @force_pmc: flag to force a power mode change
  * @silence_err_logs: flag to silence error logs
  * @dev_cmd: ufs device management command information
  * @last_dme_cmd_tstamp: time stamp of the last completed DME command
@@ -697,6 +702,22 @@ struct ufs_hba {
 	 */
 	#define UFSHCD_QUIRK_BROKEN_OCS_FATAL_ERROR		0x1000
 
+	/*
+	 * This quirk needs to be enabled if the host controller supports inline
+	 * encryption, but it uses a nonstandard mechanism where the standard
+	 * crypto registers aren't used and there is no concept of keyslots.
+	 * ufs_hba_variant_ops::init() is expected to initialize ufs_hba::ksm as
+	 * a passthrough keyslot manager.
+	 */
+	#define UFSHCD_QUIRK_NO_KEYSLOTS			0x2000
+
+	/*
+	 * This quirk needs to be enabled if the host controller requires that
+	 * the PRDT be cleared after each encrypted request because encryption
+	 * keys were stored in it.
+	 */
+	#define UFSHCD_QUIRK_KEYS_IN_PRDT			0x4000
+
 	unsigned int quirks;	/* Deviations from standard UFSHCI spec. */
 
 	/* Device deviations from standard UFS device spec. */
@@ -729,6 +750,7 @@ struct ufs_hba {
 	u32 saved_uic_err;
 	struct ufs_stats ufs_stats;
 	bool force_reset;
+	bool force_pmc;
 	bool silence_err_logs;
 
 	/* Device management request data */
@@ -1222,6 +1244,16 @@ static inline void ufshcd_vops_config_scaling_param(struct ufs_hba *hba,
 {
 	if (hba->vops && hba->vops->config_scaling_param)
 		hba->vops->config_scaling_param(hba, profile, data);
+}
+
+static inline int ufshcd_vops_fill_prdt(struct ufs_hba *hba,
+					struct ufshcd_lrb *lrbp,
+					unsigned int segments)
+{
+	if (hba->vops && hba->vops->fill_prdt)
+		return hba->vops->fill_prdt(hba, lrbp, segments);
+
+	return 0;
 }
 
 extern struct ufs_pm_lvl_states ufs_pm_lvl_states[];
