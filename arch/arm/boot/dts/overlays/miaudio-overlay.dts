@@ -1,0 +1,50 @@
+/dts-v1/;
+/plugin/;
+
+/ {
+    compatible = "brcm,bcm2708";
+
+    fragment@0 {
+        target = <&i2s>;
+        __overlay__ {
+            status = "okay";
+        };
+    };
+
+    fragment@1 {
+        target = <&i2c1>;
+        __overlay__ {
+            #address-cells = <1>;
+            #size-cells = <0>;
+            status = "okay";
+            max98089: codec@10 {
+                #sound-dai-cells = <0>;
+                compatible = "maxim,max98089", "maxim,max98088";
+                status = "okay";
+                reg = <0x10>;
+            };
+        };
+    };
+
+    fragment@2 {
+        target = <&sound>;
+        __overlay__ {
+            compatible = "simple-audio-card";
+            status = "okay";
+
+            simple-audio-card,name = "miaudio ALSA";
+            simple-audio-card,format = "i2s";
+            simple-audio-card,bitclock-master = <&cpu_dai>;
+            simple-audio-card,frame-master = <&cpu_dai>;
+
+            cpu_dai: simple-audio-card,cpu {
+                sound-dai = <&i2s>;
+                dai-tdm-slot-num = <2>;
+                dai-tdm-slot-width = <32>;
+            };
+            codec_dai: simple-audio-card,codec {
+                sound-dai = <&max98089>;
+            };
+        };
+    };
+};

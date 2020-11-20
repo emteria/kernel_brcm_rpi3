@@ -109,6 +109,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	mcp342x.dtbo \
 	media-center.dtbo \
 	merus-amp.dtbo \
+	miaudio.dtbo \
 	midi-uart0.dtbo \
 	midi-uart1.dtbo \
 	miniuart-bt.dtbo \

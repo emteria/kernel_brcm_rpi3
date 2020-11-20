@@ -132,6 +132,14 @@ static int bcm2835_restart(struct watchdog_device *wdog,
 	if (data && !kstrtoull(data, 0, &val) && val <= 63)
 		partition = val;
 
+	char* param = (char*) data;
+	if (data && param[0] == 0x72) {
+		writel_relaxed(PM_RSTS_HADWRH_SET | PM_PASSWORD, wdt->base + PM_RSTS);
+		writel_relaxed(10 | PM_PASSWORD, wdt->base + PM_WDOG);		
+		writel_relaxed(PM_RSTC_WRCFG_SET | PM_PASSWORD, wdt->base + PM_RSTC);
+		mdelay(1);
+	}
+
 	__bcm2835_restart(wdt, partition);
 
 	return 0;
