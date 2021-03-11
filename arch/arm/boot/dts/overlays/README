@@ -2936,6 +2936,14 @@ Load:   dtoverlay=vga666
 Params: <None>
 
 
+Name:   vc4-kms-dsi-7inch
+Info:   Enable the Raspberry Pi DSI 7" screen.
+        Use edt-ft5406 for the touchscreen element.
+        Requires vc4-kms-v3d to be loaded.
+Load:   dtoverlay=vc4-kms-dsi-7inch
+Params: <None>
+
+
 Name:   w1-gpio
 Info:   Configures the w1-gpio Onewire interface module.
         Use this overlay if you *don't* need a GPIO to drive an external pullup.
