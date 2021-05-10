@@ -1961,7 +1961,7 @@ static int vc4_hdmi_audio_init(struct vc4_hdmi *vc4_hdmi)
 	int index;
 	int ret;
 	int len;
-	//dirty hack to get this shit building
+	// Hack to generate same result as in v5.4 to get VC4 driver building
 	if (true) {
 		dev_warn(dev,
 			 "'dmas' DT property is missing or empty, no HDMI audio\n");
