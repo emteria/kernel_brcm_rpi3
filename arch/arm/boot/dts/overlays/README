@@ -235,7 +235,7 @@ Params:
         sd_debug                Enable debug output from SD driver (default off)
 
         sdio_overclock          Clock (in MHz) to use when the MMC framework
-                                requests 50MHz for the SDIO/WiFi interface.
+                                requests 50MHz for the SDIO/WLAN interface.
 
         tx_lpi_timer            Set the delay in microseconds between going idle
                                 and entering the low power state (default 600).
@@ -299,9 +299,23 @@ Params: activelow               Set to "on" to invert the sense of the LED
                                 REQUIRED
 
 
+Name:   adafruit-st7735r
+Info:   Overlay for the SPI-connected Adafruit 1.8" 160x128 or 128x128 displays,
+        based on the ST7735R chip.
+        This overlay uses the newer DRM/KMS "Tiny" driver.
+Load:   dtoverlay=adafruit-st7735r,<param>=<val>
+Params: 128x128                 Select the 128x128 driver (default 160x128)
+        rotate                  Display rotation {0,90,180,270} (default 90)
+        speed                   SPI bus speed in Hz (default 4000000)
+        dc_pin                  GPIO pin for D/C (default 24)
+        reset_pin               GPIO pin for RESET (default 25)
+        led_pin                 GPIO used to control backlight (default 18)
+
+
 Name:   adafruit18
 Info:   Overlay for the SPI-connected Adafruit 1.8" display (based on the
         ST7735R chip). It includes support for the "green tab" version.
+        This overlay uses the older fbtft driver.
 Load:   dtoverlay=adafruit18,<param>=<val>
 Params: green                   Use the adafruit18_green variant.
         rotate                  Display rotation {0,90,180,270}
@@ -611,7 +625,7 @@ Params: swap_lr                 Reverse the channel allocation, which will also
 
 
 Name:   balena-fin
-Info:   Overlay that enables WiFi, Bluetooth and the GPIO expander on the
+Info:   Overlay that enables WLAN, Bluetooth and the GPIO expander on the
         balenaFin carrier board for the Raspberry Pi Compute Module 3/3+ Lite.
 Load:   dtoverlay=balena-fin
 Params: <None>
@@ -620,6 +634,18 @@ Params: <None>
 Name:   bmp085_i2c-sensor
 Info:   This overlay is now deprecated - see i2c-sensor
 Load:   <Deprecated>
+
+
+Name:   cap1106
+Info:   Enables the ability to use the cap1106 touch sensor as a keyboard
+Load:   dtoverlay=cap1106,<param>=<val>
+Params: int_pin                 GPIO pin for interrupt signal (default 23)
+
+
+Name:   chipdip-dac
+Info:   Configures Chip Dip audio cards.
+Load:   dtoverlay=chipdip-dac
+Params: <None>
 
 
 Name:   cma
@@ -682,7 +708,7 @@ Params: <None>
 
 
 Name:   disable-wifi
-Info:   Disable onboard WiFi on Pi 3B, 3B+, 3A+, 4B and Zero W.
+Info:   Disable onboard WLAN on Pi 3B, 3B+, 3A+, 4B and Zero W.
 Load:   dtoverlay=disable-wifi
 Params: <None>
 
@@ -692,6 +718,14 @@ Info:   Overlay for a generic 18-bit DPI display
         This uses GPIOs 0-21 (so no I2C, uart etc.), and activates the output
         2-3 seconds after the kernel has started.
 Load:   dtoverlay=dpi18
+Params: <None>
+
+
+Name:   dpi18cpadhi
+Info:   Overlay for a generic 18-bit DPI display (in 'mode 6' connection scheme)
+        This uses GPIOs 0-9,12-17,20-25 (so no I2C, uart etc.), and activates
+        the output 3-3 seconds after the kernel has started.
+Load:   dtoverlay=dpi18cpadhi
 Params: <None>
 
 
@@ -1370,6 +1404,8 @@ Params: abx80x                  Select one of the ABx80x family:
                                   AB0801, AB0803, AB0804, AB0805,
                                   AB1801, AB1803, AB1804, AB1805
 
+        bq32000                 Select the TI BQ32000 device
+
         ds1307                  Select the DS1307 device
 
         ds1339                  Select the DS1339 device
@@ -1404,6 +1440,8 @@ Params: abx80x                  Select one of the ABx80x family:
 
         sd3078                  Select the ZXW Shenzhen whwave SD3078 device
 
+        s35390a                 Select the ABLIC S35390A device
+
         i2c0                    Choose the I2C0 bus on GPIOs 0&1
 
         i2c_csi_dsi             Choose the I2C0 bus on GPIOs 44&45
@@ -1411,6 +1449,9 @@ Params: abx80x                  Select one of the ABx80x family:
         addr                    Sets the address for the RTC. Note that the
                                 device must be configured to use the specified
                                 address.
+
+        trickle-diode-disable   Do not use the internal trickle charger diode
+                                (BQ32000 only)
 
         trickle-diode-type      Diode type for trickle charge - "standard" or
                                 "schottky" (ABx80x and RV1805 only)
@@ -1433,9 +1474,13 @@ Params: abx80x                  Select one of the ABx80x family:
                                   AB0801, AB0803, AB0804, AB0805,
                                   AB1801, AB1803, AB1804, AB1805
 
+        bq32000                 Select the TI BQ32000 device
+
         ds1307                  Select the DS1307 device
 
         ds1339                  Select the DS1339 device
+
+        ds1340                  Select the DS1340 device
 
         ds3231                  Select the DS3231 device
 
@@ -1449,7 +1494,13 @@ Params: abx80x                  Select one of the ABx80x family:
 
         pcf2129                 Select the PCF2129 device
 
+        pcf85063                Select the PCF85063 device
+
+        pcf85063a               Select the PCF85063A device
+
         pcf8523                 Select the PCF8523 device
+
+        pcf85363                Select the PCF85363 device
 
         pcf8563                 Select the PCF8563 device
 
@@ -1457,9 +1508,16 @@ Params: abx80x                  Select one of the ABx80x family:
 
         rv3028                  Select the Micro Crystal RV3028 device
 
+        sd3078                  Select the ZXW Shenzhen whwave SD3078 device
+
+        s35390a                 Select the ABLIC S35390A device
+
         addr                    Sets the address for the RTC. Note that the
                                 device must be configured to use the specified
                                 address.
+
+        trickle-diode-disable   Do not use the internal trickle charger diode
+                                (BQ32000 only)
 
         trickle-diode-type      Diode type for trickle charge - "standard" or
                                 "schottky" (ABx80x and RV1805 only)
@@ -1482,11 +1540,15 @@ Params: abx80x                  Select one of the ABx80x family:
 
 
 Name:   i2c-sensor
-Info:   Adds support for a number of I2C barometric pressure and temperature
-        sensors on i2c_arm
+Info:   Adds support for a number of I2C barometric pressure, temperature,
+        light level and chemical sensors on i2c_arm
 Load:   dtoverlay=i2c-sensor,<param>=<val>
-Params: addr                    Set the address for the BME280, BME680, BMP280,
-                                DS1621, HDC100X, LM75, SHT3x or TMP102
+Params: addr                    Set the address for the BH1750, BME280, BME680,
+                                BMP280, CCS811, DS1621, HDC100X, LM75, SHT3x or
+                                TMP102
+
+        bh1750                  Select the Rohm BH1750 ambient light sensor
+                                Valid addresses 0x23 or 0x5c, default 0x23
 
         bme280                  Select the Bosch Sensortronic BME280
                                 Valid addresses 0x76-0x77, default 0x76
@@ -1500,6 +1562,9 @@ Params: addr                    Set the address for the BME280, BME680, BMP280,
 
         bmp280                  Select the Bosch Sensortronic BMP280
                                 Valid addresses 0x76-0x77, default 0x76
+
+        ccs811                  Select the AMS CCS811 digital gas sensor
+                                Valid addresses 0x5a-0x5b, default 0x5b
 
         ds1621                  Select the Dallas Semiconductors DS1621 temp
                                 sensor. Valid addresses 0x48-0x4f, default 0x48
@@ -1526,6 +1591,9 @@ Params: addr                    Set the address for the BME280, BME680, BMP280,
 
         sps30                   Select the Sensirion SPS30 particulate matter
                                 sensor. Fixed address 0x69.
+
+        sgp30                   Select the Sensirion SGP30 VOC sensor.
+                                Fixed address 0x58.
 
         tmp102                  Select the Texas Instruments TMP102 temp sensor
                                 Valid addresses 0x48-0x4b, default 0x48
@@ -1638,6 +1706,8 @@ Info:   Sony IMX219 camera module.
 Load:   dtoverlay=imx219,<param>=<val>
 Params: rotation                Mounting rotation of the camera sensor (0 or
                                 180, default 180)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   imx290
@@ -1654,6 +1724,21 @@ Params: 4lane                   Enable 4 CSI2 lanes. This requires a Compute
                                 (the default), whilst those from Innomaker use
                                 74.25MHz.
         mono                    Denote that the module is a mono sensor.
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
+        rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+
+
+Name:   imx378
+Info:   Sony IMX378 camera module.
+        Uses Unicam 1, which is the standard camera connector on most Pi
+        variants.
+Load:   dtoverlay=imx378,<param>=<val>
+Params: rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 180)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   imx477
@@ -1663,6 +1748,19 @@ Info:   Sony IMX477 camera module.
 Load:   dtoverlay=imx477,<param>=<val>
 Params: rotation                Mounting rotation of the camera sensor (0 or
                                 180, default 180)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
+
+
+Name:   imx519
+Info:   Sony IMX519 camera module.
+        Uses Unicam 1, which is the standard camera connector on most Pi
+        variants.
+Load:   dtoverlay=imx519,<param>=<val>
+Params: rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   iqaudio-codec
@@ -1904,6 +2002,21 @@ Params: s08-spi<n>-<m>-present  4-bit integer, bitmap indicating MCP23S08
                                 or INTB output of MCP23S17 is connected.
 
 
+Name:   mcp2515
+Info:   Configures the MCP2515 CAN controller on spi0/1/2
+        For devices on spi1 or spi2, the interfaces should be enabled
+        with one of the spi1-1/2/3cs and/or spi2-1/2/3cs overlays.
+Load:   dtoverlay=mcp2515,<param>=<val>
+Params: spi<n>-<m>              Configure device at spi<n>, cs<m>
+                                (boolean, required)
+
+        oscillator              Clock frequency for the CAN controller (Hz)
+
+        speed                   Maximum SPI frequence (Hz)
+
+        interrupt               GPIO for interrupt signal
+
+
 Name:   mcp2515-can0
 Info:   Configures the MCP2515 CAN controller on spi0.0
 Load:   dtoverlay=mcp2515-can0,<param>=<val>
@@ -2007,8 +2120,8 @@ Params: speed                   Display SPI bus speed
 
 Name:   merus-amp
 Info:   Configures the merus-amp audio card
-Load:   dtoverlay=merus-amp,<param>=<val>
-Params: spioff                  Turn SPI bus off
+Load:   dtoverlay=merus-amp
+Params: <None>
 
 
 Name:   midi-uart0
@@ -2022,6 +2135,34 @@ Name:   midi-uart1
 Info:   Configures UART1 (ttyS0) so that a requested 38.4kbaud actually gets
         31.25kbaud, the frequency required for MIDI
 Load:   dtoverlay=midi-uart1
+Params: <None>
+
+
+Name:   midi-uart2
+Info:   Configures UART2 (ttyAMA1) so that a requested 38.4kbaud actually gets
+        31.25kbaud, the frequency required for MIDI
+Load:   dtoverlay=midi-uart2
+Params: <None>
+
+
+Name:   midi-uart3
+Info:   Configures UART3 (ttyAMA2) so that a requested 38.4kbaud actually gets
+        31.25kbaud, the frequency required for MIDI
+Load:   dtoverlay=midi-uart3
+Params: <None>
+
+
+Name:   midi-uart4
+Info:   Configures UART4 (ttyAMA3) so that a requested 38.4kbaud actually gets
+        31.25kbaud, the frequency required for MIDI
+Load:   dtoverlay=midi-uart4
+Params: <None>
+
+
+Name:   midi-uart5
+Info:   Configures UART5 (ttyAMA4) so that a requested 38.4kbaud actually gets
+        31.25kbaud, the frequency required for MIDI
+Load:   dtoverlay=midi-uart5
 Params: <None>
 
 
@@ -2049,6 +2190,12 @@ Info:   Switch the onboard Bluetooth function on Pi 3B, 3B+, 3A+, 4B and Zero W
 Load:   dtoverlay=miniuart-bt,<param>=<val>
 Params: krnbt                   Set to "on" to enable autoprobing of Bluetooth
                                 driver without need of hciattach/btattach
+
+
+Name:   mlx90640
+Info:   Overlay for i2c connected mlx90640 thermal camera
+Load:   dtoverlay=mlx90640
+Params: <None>
 
 
 Name:   mmc
@@ -2088,22 +2235,30 @@ Info:   Omnivision OV5647 camera module.
 Load:   dtoverlay=ov5647,<param>=<val>
 Params: rotation                Mounting rotation of the camera sensor (0 or
                                 180, default 0)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   ov7251
 Info:   Omnivision OV7251 camera module.
         Uses Unicam 1, which is the standard camera connector on most Pi
         variants.
-Load:   dtoverlay=ov7251
-Params: <None>
+Load:   dtoverlay=ov7251,<param>=<val>
+Params: rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   ov9281
 Info:   Omnivision OV9281 camera module.
         Uses Unicam 1, which is the standard camera connector on most Pi
         variants.
-Load:   dtoverlay=ov9281
-Params: <None>
+Load:   dtoverlay=ov9281,<param>=<val>
+Params: rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
 
 
 Name:   papirus
@@ -2395,11 +2550,22 @@ Params: gpio_pin                Output GPIO (default 18)
 
 
 Name:   qca7000
-Info:   I2SE's Evaluation Board for PLC Stamp micro
+Info:   in-tech's Evaluation Board for PLC Stamp micro
+        This uses spi0 and a separate GPIO interrupt to connect the QCA7000.
 Load:   dtoverlay=qca7000,<param>=<val>
 Params: int_pin                 GPIO pin for interrupt signal (default 23)
 
         speed                   SPI bus speed (default 12 MHz)
+
+
+Name:   qca7000-uart0
+Info:   in-tech's Evaluation Board for PLC Stamp micro (UART)
+        This uses uart0/ttyAMA0 over GPIOs 14 & 15 to connect the QCA7000.
+        But it requires disabling of onboard Bluetooth on
+        Pi 3B, 3B+, 3A+, 4B and Zero W.
+Load:   dtoverlay=qca7000-uart0,<param>=<val>
+Params: baudrate                Set the baudrate for the UART (default
+                                "115200")
 
 
 Name:   rotary-encoder
@@ -2477,6 +2643,27 @@ Params: touchscreen-size-x      Touchscreen X resolution (default 800)
 Name:   rpi-poe
 Info:   Raspberry Pi PoE HAT fan
 Load:   dtoverlay=rpi-poe,<param>[=<val>]
+Params: poe_fan_temp0           Temperature (in millicelcius) at which the fan
+                                turns on (default 40000)
+        poe_fan_temp0_hyst      Temperature delta (in millicelcius) at which
+                                the fan turns off (default 2000)
+        poe_fan_temp1           Temperature (in millicelcius) at which the fan
+                                speeds up (default 45000)
+        poe_fan_temp1_hyst      Temperature delta (in millicelcius) at which
+                                the fan slows down (default 2000)
+        poe_fan_temp2           Temperature (in millicelcius) at which the fan
+                                speeds up (default 50000)
+        poe_fan_temp2_hyst      Temperature delta (in millicelcius) at which
+                                the fan slows down (default 2000)
+        poe_fan_temp3           Temperature (in millicelcius) at which the fan
+                                speeds up (default 55000)
+        poe_fan_temp3_hyst      Temperature delta (in millicelcius) at which
+                                the fan slows down (default 5000)
+
+
+Name:   rpi-poe-plus
+Info:   Raspberry Pi PoE+ HAT fan
+Load:   dtoverlay=rpi-poe-plus,<param>[=<val>]
 Params: poe_fan_temp0           Temperature (in millicelcius) at which the fan
                                 turns on (default 40000)
         poe_fan_temp0_hyst      Temperature delta (in millicelcius) at which
@@ -2582,7 +2769,7 @@ Name:   sdhost
 Info:   Selects the bcm2835-sdhost SD/MMC driver, optionally with overclock.
         N.B. This overlay is designed for situations where the mmc driver is
         the default, so it disables the other (mmc) interface - this will kill
-        WiFi on a Pi3. If this isn't what you want, either use the sdtweak
+        WLAN on a Pi3. If this isn't what you want, either use the sdtweak
         overlay or the new sd_* dtparams of the base DTBs.
 Load:   dtoverlay=sdhost,<param>=<val>
 Params: overclock_50            Clock (in MHz) to use when the MMC framework
@@ -2661,6 +2848,16 @@ Params: speed                   SPI bus speed (default 4000000)
         dc_pin                  GPIO pin for D/C (default 24)
         reset_pin               GPIO pin for RESET (default 25)
         height                  Display height (32 or 64; default 64)
+
+
+Name:   si446x-spi0
+Info:   Overlay for Si446x UHF Transceiver via SPI using si446x driver.
+        The driver is currently out-of-tree at
+        https://github.com/sunipkmukherjee/silabs.git
+Load:   dtoverlay=si446x-spi0,<param>=<val>
+Params: speed                   SPI bus speed (default 4000000)
+        int_pin                 GPIO pin for interrupts (default 17)
+        reset_pin               GPIO pin for RESET (default 27)
 
 
 Name:   smi
@@ -2984,6 +3181,17 @@ Params: speed                   SPI bus speed (default 10000000)
         height                  Display height (32 or 64; default 64)
 
 
+Name:   ssd1331-spi
+Info:   Overlay for SSD1331 OLED via SPI using fbtft staging driver.
+Load:   dtoverlay=ssd1331-spi,<param>=<val>
+Params: speed                   SPI bus speed (default 4500000)
+        rotate                  Display rotation (0, 90, 180 or 270; default 0)
+        fps                     Delay between frame updates (default 25)
+        debug                   Debug output level (0-7; default 0)
+        dc_pin                  GPIO pin for D/C (default 24)
+        reset_pin               GPIO pin for RESET (default 25)
+
+
 Name:   ssd1351-spi
 Info:   Overlay for SSD1351 OLED via SPI using fbtft staging driver.
 Load:   dtoverlay=ssd1351-spi,<param>=<val>
@@ -3177,12 +3385,41 @@ Params: cma-512                 CMA is 512MB (needs 1GB)
         cma-default             Use upstream's default value
 
 
+Name:   vc4-fkms-v3d-pi4
+Info:   Enable Eric Anholt's DRM VC4 V3D driver on top of the dispmanx
+        display stack.
+Load:   dtoverlay=vc4-fkms-v3d-pi4,<param>
+Params: cma-512                 CMA is 512MB (needs 1GB)
+        cma-448                 CMA is 448MB (needs 1GB)
+        cma-384                 CMA is 384MB (needs 1GB)
+        cma-320                 CMA is 320MB (needs 1GB)
+        cma-256                 CMA is 256MB (needs 1GB)
+        cma-192                 CMA is 192MB (needs 1GB)
+        cma-128                 CMA is 128MB
+        cma-96                  CMA is 96MB
+        cma-64                  CMA is 64MB
+        cma-size                CMA size in bytes, 4MB aligned
+        cma-default             Use upstream's default value
+
+
+Name:   vc4-kms-dpi-at056tn53v1
+Info:   Enable an Innolux 5.6in VGA TFT connected to DPI interface under KMS.
+        Requires vc4-kms-v3d to be loaded.
+Load:   dtoverlay=vc4-kms-dpi-at056tn53v1
+Params: <None>
+
+
 Name:   vc4-kms-dsi-7inch
 Info:   Enable the Raspberry Pi DSI 7" screen.
-        Use edt-ft5406 for the touchscreen element.
+        Includes the edt-ft5406 for the touchscreen element.
         Requires vc4-kms-v3d to be loaded.
-Load:   dtoverlay=vc4-kms-dsi-7inch
-Params: <None>
+Load:   dtoverlay=vc4-kms-dsi-7inch,<param>=<val>
+Params: sizex                   Touchscreen size x (default 800)
+        sizey                   Touchscreen size y (default 480)
+        invx                    Touchscreen inverted x axis
+        invy                    Touchscreen inverted y axis
+        swapxy                  Touchscreen swapped x y axis
+        disable_touch           Disables the touch screen overlay driver
 
 
 Name:   vc4-kms-dsi-lt070me05000

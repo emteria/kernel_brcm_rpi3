@@ -36,6 +36,8 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_vblank.h>
 
+#include <soc/bcm2835/raspberrypi-firmware.h>
+
 #include "uapi/drm/vc4_drm.h"
 
 #include "vc4_drv.h"
@@ -226,41 +228,6 @@ static int compare_dev(struct device *dev, void *data)
 	return dev == data;
 }
 
-static struct drm_crtc *vc4_drv_find_crtc(struct drm_device *drm,
-					  struct drm_encoder *encoder)
-{
-	struct drm_crtc *crtc;
-
-	if (WARN_ON(hweight32(encoder->possible_crtcs) != 1))
-		return NULL;
-
-	drm_for_each_crtc(crtc, drm) {
-		if (!drm_encoder_crtc_ok(encoder, crtc))
-			continue;
-
-		return crtc;
-	}
-
-	return NULL;
-}
-
-static void vc4_drv_set_encoder_data(struct drm_device *drm)
-{
-	struct drm_encoder *encoder;
-
-	drm_for_each_encoder(encoder, drm) {
-		struct vc4_encoder *vc4_encoder;
-		struct drm_crtc *crtc;
-
-		crtc = vc4_drv_find_crtc(drm, encoder);
-		if (WARN_ON(!crtc))
-			return;
-
-		vc4_encoder = to_vc4_encoder(encoder);
-		vc4_encoder->crtc = crtc;
-	}
-}
-
 static void vc4_match_add_drivers(struct device *dev,
 				  struct component_match **match,
 				  struct platform_driver *const *drivers,
@@ -290,6 +257,18 @@ const struct of_device_id vc4_dma_range_matches[] = {
 	{ .compatible = "brcm,vc4-v3d" },
 	{}
 };
+
+/*
+ * we need this helper function for determining presence of fkms
+ * before it's been bound
+ */
+static bool firmware_kms(void)
+{
+	return of_device_is_available(of_find_compatible_node(NULL, NULL,
+	       "raspberrypi,rpi-firmware-kms")) ||
+	       of_device_is_available(of_find_compatible_node(NULL, NULL,
+	       "raspberrypi,rpi-firmware-kms-2711"));
+}
 
 static int vc4_drm_bind(struct device *dev)
 {
@@ -340,18 +319,34 @@ static int vc4_drm_bind(struct device *dev)
 	if (ret)
 		return ret;
 
+	node = of_parse_phandle(dev->of_node, "raspberrypi,firmware", 0);
+	if (node) {
+		vc4->firmware = rpi_firmware_get(node);
+		of_node_put(node);
+
+		if (!vc4->firmware)
+			return -EPROBE_DEFER;
+	}
+
+	drm_fb_helper_remove_conflicting_framebuffers(NULL, "vc4drmfb", false);
+
+	if (vc4->firmware && !firmware_kms()) {
+		ret = rpi_firmware_property(vc4->firmware,
+					    RPI_FIRMWARE_NOTIFY_DISPLAY_DONE,
+					    NULL, 0);
+		if (ret)
+			drm_warn(drm, "Couldn't stop firmware display driver: %d\n", ret);
+	}
+
 	ret = component_bind_all(dev, drm);
 	if (ret)
 		return ret;
-	vc4_drv_set_encoder_data(drm);
 
 	if (!vc4->firmware_kms) {
 		ret = vc4_plane_create_additional_planes(drm);
 		if (ret)
 			goto unbind_all;
 	}
-
-	drm_fb_helper_remove_conflicting_framebuffers(NULL, "vc4drmfb", false);
 
 	ret = vc4_kms_load(drm);
 	if (ret < 0)
