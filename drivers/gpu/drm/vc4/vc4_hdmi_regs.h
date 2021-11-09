@@ -440,7 +440,8 @@ static inline void vc4_hdmi_write(struct vc4_hdmi *hdmi,
 	const struct vc4_hdmi_register *field;
 	const struct vc4_hdmi_variant *variant = hdmi->variant;
 	void __iomem *base;
-
+	lockdep_assert_held(&hdmi->hw_lock);
+	
 	if (reg >= variant->num_registers) {
 		dev_warn(&hdmi->pdev->dev,
 			 "Invalid register ID %u\n", reg);
