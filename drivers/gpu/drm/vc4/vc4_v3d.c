@@ -304,8 +304,10 @@ static int vc4_v3d_runtime_suspend(struct device *dev)
 
 	vc4_irq_uninstall(vc4->dev);
 
+	/*
 	drm_gem_object_unreference_unlocked(&vc4->bin_bo->base.base);
 	vc4->bin_bo = NULL;
+	*/
 
 	return 0;
 }
@@ -316,9 +318,11 @@ static int vc4_v3d_runtime_resume(struct device *dev)
 	struct vc4_dev *vc4 = v3d->vc4;
 	int ret;
 
+	/*
 	ret = vc4_allocate_bin_bo(vc4->dev);
 	if (ret)
 		return ret;
+	*/
 
 	vc4_v3d_init_hw(vc4->dev);
 
