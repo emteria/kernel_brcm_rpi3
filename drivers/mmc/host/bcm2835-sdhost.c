@@ -1312,6 +1312,7 @@ static void bcm2835_sdhost_timeout(unsigned long data)
 	log_event("TIM<", 0, 0);
 
 	pr_err("resetting due to timeout\n");
+	BUG();
 	bcm2835_sdhost_reset(host->mmc);
 
 	if (host->mrq) {
