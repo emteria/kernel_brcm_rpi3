@@ -7,6 +7,7 @@ DEFCONFIG=bcm2711_aosp13_defconfig
 
 MAKE_GOALS="
 Image.gz
+modules
 dtbs
 "
 
