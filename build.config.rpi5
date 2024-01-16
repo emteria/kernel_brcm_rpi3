@@ -8,6 +8,7 @@ DEFCONFIG=android_rpi5_defconfig
 MAKE_GOALS="
 Image
 dtbs
+modules
 "
 
 FILES="

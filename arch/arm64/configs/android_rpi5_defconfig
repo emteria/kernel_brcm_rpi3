@@ -1644,7 +1644,7 @@ CONFIG_PREVENT_FIRMWARE_BUILD=y
 #
 CONFIG_FW_LOADER=y
 CONFIG_EXTRA_FIRMWARE="regulatory.db regulatory.db.p7s brcm/BCM4345C0.hcd brcm/brcmfmac43455-sdio.bin brcm/brcmfmac43455-sdio.clm_blob brcm/brcmfmac43455-sdio.txt"
-CONFIG_EXTRA_FIRMWARE_DIR="../vendor/brcm/rpi5/proprietary/vendor/firmware"
+CONFIG_EXTRA_FIRMWARE_DIR="../../proprietary_vendor_brcm/rpi5/proprietary/vendor/firmware"
 # CONFIG_FW_LOADER_USER_HELPER is not set
 # CONFIG_FW_LOADER_COMPRESS is not set
 # CONFIG_FW_CACHE is not set
