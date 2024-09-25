@@ -1202,7 +1202,6 @@ kernel_build(
     ],
     module_outs = _RPI4_MODULE_OUTS,
     strip_modules = True,
-
 )
 
 kernel_build(
