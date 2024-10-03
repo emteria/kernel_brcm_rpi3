@@ -3,6 +3,6 @@ KERNEL_DIR=common
 . ${ROOT_DIR}/${KERNEL_DIR}/build.config.aarch64
 
 BRANCH=
-DEFCONFIG=android_rpi4_defconfig
+DEFCONFIG=bcm2711_aosp14_defconfig
 FILES=
 IN_KERNEL_MODULES=1
